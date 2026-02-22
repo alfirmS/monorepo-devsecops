@@ -1,0 +1,200 @@
+pipeline {
+
+  parameters {
+    string(
+      name: 'IMAGE_TAG',
+      defaultValue: '',
+      description: 'Docker image tag. Kosongkan untuk pakai BUILD_NUMBER'
+    )
+    string(
+      name: 'GIT_BRANCH',
+      defaultValue: 'master',
+      description: 'Branch atau tag yang akan di-build'
+    )
+  }
+
+  environment {
+    // ── Service & ENV ───────────────────────────────────────
+    SERVICE          = 'vampi'
+    ENV              = 'development'
+
+    // ── Repositories ────────────────────────────────────────
+    SERVICE_REPO     = 'vampi'
+    DEVOPS_REPO      = 'git@github.com:alfirmS/monorepo-devsecops.git'
+    DEVOPS_BRANCH    = 'main'
+    HELM_STARTER_BRANCH = 'helm-starter'
+
+    // ── Paths ────────────────────────────────────────────────
+    DOCKER_PATH      = './Dockerfile'
+    HELM_VALUES_PATH = "services/${SERVICE}/values-${ENV}.yaml"
+    KUBE_NAMESPACE   = '${ENV}'
+
+    // ── Credentials ─────────────────────────────────────────
+    REGISTRY_CRED_ID   = '${registryCredId}'
+    KUBECONFIG_CRED_ID = '${kubeConfigCredId}'
+    DOCKERHUB_OCI_CRED = 'dockerhub-oci-credentials'
+    BITBUCKET_CRED_ID  = 'bitbucket-scm-deployer'
+  }
+
+  agent { label 'main' }
+
+  stages {
+
+    // ── 1. Build Docker Image ───────────────────────────────
+    stage('Build & Push Docker Image') {
+      steps {
+        script {
+          def tag = params.IMAGE_TAG?.trim() ? params.IMAGE_TAG : env.BUILD_NUMBER
+          env.RESOLVED_TAG = tag
+
+          withCredentials([usernamePassword(
+            credentialsId: env.REGISTRY_CRED_ID,
+            usernameVariable: 'REG_USER',
+            passwordVariable: 'REG_PASS'
+          )]) {
+            sh """
+              docker login -u "\${REG_USER}" -p "\${REG_PASS}" \${REGISTRY_HOST}
+              docker build -f ${dockerPath} -t \${REGISTRY_HOST}/${service}:\${tag} .
+              docker push \${REGISTRY_HOST}/${service}:\${tag}
+              docker rmi \${REGISTRY_HOST}/${service}:\${tag} || true
+            """
+          }
+          echo "✅ Image pushed: \${REGISTRY_HOST}/${service}:\${tag}"
+        }
+      }
+    }
+
+    // ── 2. Prepare Helm Chart ───────────────────────────────
+    stage('Generate Helm Chart') {
+      steps {
+        script {
+          // 2a. Clone starter helm dari branch helm-starter
+          withCredentials([sshUserPrivateKey(credentialsId: env.BITBUCKET_CRED_ID, keyFileVariable: 'SSH_KEY')]) {
+            sh """
+              export GIT_SSH_COMMAND="ssh -i \${SSH_KEY} -o StrictHostKeyChecking=no"
+              git clone --branch \${HELM_STARTER_BRANCH} --single-branch \${DEVOPS_REPO} helm-chart
+            """
+          }
+
+          // 2b. Replace chart name ke nama service
+          sh """
+            sed -i 's/name: starter-helm/name: ${service}/g' helm-chart/starter-helm/Chart.yaml
+            sed -i 's/description: .*/description: Helm chart for ${service}/g' helm-chart/starter-helm/Chart.yaml
+          """
+
+          // 2c. Clone devops repo untuk ambil values
+          withCredentials([sshUserPrivateKey(credentialsId: env.BITBUCKET_CRED_ID, keyFileVariable: 'SSH_KEY')]) {
+            sh """
+              export GIT_SSH_COMMAND="ssh -i \${SSH_KEY} -o StrictHostKeyChecking=no"
+              git clone --branch \${DEVOPS_BRANCH} --single-branch \${DEVOPS_REPO} devops-configs
+            """
+          }
+
+          // 2d. helm dep update (pull common library dari OCI DockerHub)
+          withCredentials([usernamePassword(
+            credentialsId: env.DOCKERHUB_OCI_CRED,
+            usernameVariable: 'DH_USER',
+            passwordVariable: 'DH_PASS'
+          )]) {
+            sh """
+              helm registry login registry-1.docker.io -u "\${DH_USER}" -p "\${DH_PASS}"
+              helm dep update helm-chart/starter-helm
+              helm registry logout registry-1.docker.io
+            """
+          }
+          echo "✅ Helm chart siap dengan dependency terbaru"
+        }
+      }
+    }
+
+    // ── 3. Deploy ────────────────────────────────────────────
+    stage('Deploy') {
+      steps {
+        script {
+          def tag = env.RESOLVED_TAG
+
+          withCredentials([file(credentialsId: env.KUBECONFIG_CRED_ID, variable: 'KUBECONFIG')]) {
+
+            // 3a. Validate (helm lint + dry-run)
+            sh """
+              helm lint helm-chart/starter-helm \
+                -f devops-configs/\${HELM_VALUES_PATH} \
+                --set image.tag=\${tag}
+
+              helm upgrade --install ${service} helm-chart/starter-helm \\
+                -f devops-configs/\${HELM_VALUES_PATH} \\
+                --set image.tag=\${tag} \\
+                --namespace \${KUBE_NAMESPACE} \\
+                --dry-run \\
+                --debug
+            """
+            echo "✅ Helm lint & dry-run OK"
+
+            // 3b. Actual deploy
+            sh """
+              helm upgrade --install ${service} helm-chart/starter-helm \\
+                -f devops-configs/\${HELM_VALUES_PATH} \\
+                --set image.tag=\${tag} \\
+                --namespace \${KUBE_NAMESPACE} \\
+                --create-namespace \\
+                --atomic \\
+                --timeout 5m \\
+                --history-max 5
+            """
+            echo "✅ Helm deploy selesai"
+          }
+        }
+      }
+    }
+
+    // ── 4. Post-Deploy Check ─────────────────────────────────
+    stage('Post-Deploy Check') {
+      steps {
+        script {
+          withCredentials([file(credentialsId: env.KUBECONFIG_CRED_ID, variable: 'KUBECONFIG')]) {
+            sh """
+              echo "─── Rollout Status ───"
+              kubectl rollout status deployment/${service} \\
+                -n \${KUBE_NAMESPACE} \\
+                --timeout=3m
+
+              echo "─── Pods ───"
+              kubectl get pods -n \${KUBE_NAMESPACE} -l app.kubernetes.io/name=${service} -o wide
+
+              echo "─── Recent Events ───"
+              kubectl get events -n \${KUBE_NAMESPACE} \\
+                --field-selector involvedObject.name=${service} \\
+                --sort-by='.lastTimestamp' | tail -10
+            """
+          }
+          echo "✅ Post-deploy check OK"
+        }
+      }
+    }
+  }
+
+  post {
+    success {
+      echo """
+✅ Deploy ${service} ke [${env.toUpperCase()}] berhasil!
+   Image tag : \${env.RESOLVED_TAG}
+   Namespace : ${env}
+      """
+    }
+    failure {
+      script {
+        echo "❌ Deploy gagal, mencoba rollback..."
+        withCredentials([file(credentialsId: env.KUBECONFIG_CRED_ID, variable: 'KUBECONFIG')]) {
+          sh """
+            helm rollback ${service} 0 -n \${KUBE_NAMESPACE} || true
+            echo "⚠️  Rollback selesai (atau tidak ada revision sebelumnya)"
+          """
+        }
+      }
+    }
+    cleanup {
+      sh 'rm -rf helm-chart devops-configs || true'
+    }
+  }
+}
+"""}
