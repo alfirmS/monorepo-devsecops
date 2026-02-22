@@ -70,6 +70,7 @@ pipeline {
             passwordVariable: 'REG_PASS'
           )]) {
             sh """
+              pwd
               docker login -u "\${REG_USER}" -p "\${REG_PASS}" \${REGISTRY_HOST}
 
               docker build \
