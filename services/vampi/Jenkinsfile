@@ -19,7 +19,7 @@ pipeline {
     ENV                 = 'development'
 
     // ── Repositories ─────────────────────────────────────────
-    SERVICE_REPO        = 'vampi'
+    SERVICE_REPO        = 'git@github.com:alfirmS/VAmPI.git'
     DEVOPS_REPO         = 'git@github.com:alfirmS/monorepo-devsecops.git'
     DEVOPS_BRANCH       = 'main'
 
