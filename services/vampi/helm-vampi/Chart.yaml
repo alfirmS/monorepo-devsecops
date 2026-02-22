@@ -1,0 +1,16 @@
+apiVersion: v2
+name: commonStarters        # <-- ganti dengan nama service
+description: |
+  Helm chart untuk Go service — GANTI DESKRIPSI INI.
+  Canary deployment via Nginx Ingress traffic splitting.
+  Secrets via External Secrets Operator + Vault KV v2.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+
+dependencies:
+  - name: common-library
+    version: "1.0.0"
+    repository: "oci://registry-1.docker.io/sfirman87"
+    # Untuk dev lokal:
+    # repository: "file://../commonLibrary"
