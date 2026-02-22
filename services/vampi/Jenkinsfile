@@ -42,14 +42,17 @@ pipeline {
     // ── 1. Checkout Service Repo ─────────────────────────────
     stage('Checkout') {
       steps {
-        script {
-          withCredentials([sshUserPrivateKey(credentialsId: env.GIT_CRED_ID, keyFileVariable: 'SSH_KEY')]) {
-            sh """
-              export GIT_SSH_COMMAND="ssh -i \${SSH_KEY} -o StrictHostKeyChecking=no"
-              git clone --branch \${params.GIT_BRANCH} --single-branch \${SERVICE_REPO} service-src
-            """
-          }
-        }
+        // Monorepo sudah di-checkout otomatis oleh Jenkins (untuk baca Jenkinsfile ini)
+        // Checkout service repo ke subfolder service-src
+        checkout([
+          $class: 'GitSCM',
+          branches: [[name: "${params.GIT_BRANCH}"]],
+          extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: 'service-src']],
+          userRemoteConfigs: [[
+            url: "${SERVICE_REPO}",
+            credentialsId: "${GIT_CRED_ID}"
+          ]]
+        ])
       }
     }
 
@@ -173,7 +176,7 @@ pipeline {
   post {
     success {
       echo """
-✅ Deploy ${SERVICE} ke [{{ ENV_UPPER }}] berhasil!
+✅ Deploy ${SERVICE} ke [developement] berhasil!
    Image tag : ${IMAGE_TAG}
    Namespace : ${KUBE_NAMESPACE}
       """
