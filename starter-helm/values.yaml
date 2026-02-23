@@ -1,14 +1,12 @@
 replicaCount: 1
 
 global:
-  env: "development"
+  env: "{{ GLOBAL_ENV }}"
 
 image:
-  repository: nginx
-  # This sets the pull policy for images.
-  pullPolicy: IfNotPresent
-  # Overrides the image tag whose default is the chart appVersion.
-  tag: ""
+  repository: "{{ IMAGE_REPOSITORY }}"
+  pullPolicy: Always
+  tag: "{{ IMAGE_TAG }}"
 
 imagePullSecrets:
   - name: regcred
@@ -23,36 +21,24 @@ serviceAccount:
 podAnnotations: {}
 podLabels: {}
 podSecurityContext: {}
-  # fsGroup: 2000
 
 securityContext: {}
-  # capabilities:
-  #   drop:
-  #   - ALL
-  # readOnlyRootFilesystem: true
-  # runAsNonRoot: true
-  # runAsUser: 1000
 
 service:
-  type: ClusterIP
-  containerPort: 5000
-  targetPort: 5000
+  type: {{ SERVICE_TYPE }}
+  containerPort: {{ CONTAINER_PORT }}
+  targetPort: {{ CONTAINER_PORT }}
 
 ingress:
   enabled: false
   className: ""
   annotations: {}
-    # kubernetes.io/ingress.class: nginx
-    # kubernetes.io/tls-acme: "true"
   hosts:
     - host: chart-example.local
       paths:
         - path: /
           pathType: ImplementationSpecific
   tls: []
-    # - secretName: chart-example-tls
-    #   hosts:
-    #     - chart-example.local
 
 httpRoute:
   enabled: false
@@ -60,7 +46,6 @@ httpRoute:
   parentRefs:
   - name: gateway
     sectionName: http
-    # namespace: default
   hostnames:
   - chart-example.local
   rules:
@@ -68,33 +53,17 @@ httpRoute:
     - path:
         type: PathPrefix
         value: /headers
-  #   filters:
-  #   - type: RequestHeaderModifier
-  #     requestHeaderModifier:
-  #       set:
-  #       - name: My-Overwrite-Header
-  #         value: this-is-the-only-value
-  #       remove:
-  #       - User-Agent
-  # - matches:
-  #   - path:
-  #       type: PathPrefix
-  #       value: /echo
-  #     headers:
-  #     - name: version
-  #       value: v2
 
 resources:
   limits:
-    cpu: 1000m
-    memory: 2000Mi
+    cpu: "{{ CPU_LIMIT }}"
+    memory: "{{ MEM_LIMIT }}"
   requests:
-    cpu: 500m
-    memory: 1024Mi
+    cpu: "{{ CPU_REQUEST }}"
+    memory: "{{ MEM_REQUEST }}"
 
 healthCheck:
   enabled: false
-
 livenessProbe:
   httpGet:
     path: /
@@ -106,26 +75,22 @@ readinessProbe:
 
 deployment:
   enabled: true
-
   strategy:
     type: RollingUpdate
     rollingUpdate:
       maxSurge: 1
       maxUnavailable: 0
-
   minReadySeconds: 10
-
   lifecycle:
     preStop:
       exec:
         command: ["/bin/sh", "-c", "sleep 5"]
-
   terminationGracePeriodSeconds: 30
 
 hpa:
-  enabled: true
-  minReplicas: 2
-  maxReplicas: 10
+  enabled: {{ HPA_ENABLED }}
+  minReplicas: {{ HPA_MIN_REPLICAS }}
+  maxReplicas: {{ HPA_MAX_REPLICAS }}
   behavior:
     scaleUp:
       stabilizationWindowSeconds: 60
@@ -145,34 +110,23 @@ hpa:
         name: cpu
         target:
           type: Utilization
-          averageUtilization: 70
+          averageUtilization: {{ HPA_CPU_TARGET }}
     - type: Resource
       resource:
         name: memory
         target:
           type: Utilization
-          averageUtilization: 80
+          averageUtilization: {{ HPA_MEM_TARGET }}
 
 pdb:
-  enabled: true
-  minAvailable: 1
+  enabled: {{ PDB_ENABLED }}
+  minAvailable: {{ PDB_MIN_AVAILABLE }}
 
 externalSecret:
-  enabled: false
+  enabled: {{ EXTERNAL_SECRET_ENABLED }}
 
 volumes: []
-  # - name: foo
-  #   secret:
-  #     secretName: mysecret
-  #     optional: false
-
 volumeMounts: []
-  # - name: foo
-  #   mountPath: "/etc/foo"
-  #   readOnly: true
-
 nodeSelector: {}
-
 tolerations: []
-
 affinity: {}
