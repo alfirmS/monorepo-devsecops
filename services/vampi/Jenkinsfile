@@ -89,6 +89,8 @@ pipeline {
     stage('Prepare Helm') {
       steps {
         script {
+          env.CHART_VERSION = "${dateStamp}.${BUILD_NUMBER}"
+
           withCredentials([usernamePassword(
             credentialsId: env.DOCKERHUB_OCI_CRED,
             usernameVariable: 'DH_USER',
@@ -103,7 +105,7 @@ pipeline {
 
           // Set version & appVersion di Chart.yaml mengikuti IMAGE_TAG
           sh """
-	          sed -i "s|^version:.*|version: \\\"${IMAGE_TAG}\\\"|" ${HELM_CHART_PATH}/Chart.yaml
+	          sed -i "s|^version:.*|version: \\\"${CHART_VERSION}\\\"|" ${HELM_CHART_PATH}/Chart.yaml
             sed -i "s|^appVersion:.*|appVersion: \\\"${IMAGE_TAG}\\\"|" ${HELM_CHART_PATH}/Chart.yaml
           """
           echo "✅ Helm siap dari monorepo"
