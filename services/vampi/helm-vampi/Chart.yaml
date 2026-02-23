@@ -1,9 +1,7 @@
 apiVersion: v2
-name: commonStarters        # <-- ganti dengan nama service
+name: vampi
 description: |
-  Helm chart untuk Go service — GANTI DESKRIPSI INI.
-  Canary deployment via Nginx Ingress traffic splitting.
-  Secrets via External Secrets Operator + Vault KV v2.
+  Helm chart untuk vampi service
 type: application
 version: 0.1.0
 appVersion: "0.1.0"
