@@ -8,7 +8,7 @@ pipeline {
   parameters {
     string(
       name: 'GIT_BRANCH',
-      defaultValue: 'dev',
+      defaultValue: 'master',
       description: 'Branch atau tag yang akan di-build'
     )
   }
@@ -24,13 +24,13 @@ pipeline {
     // ── Helm ─────────────────────────────────────────────────
     HELM_CHART_PATH     = 'services/vampi/helm-vampi'
     HELM_VALUES_PATH    = 'services/vampi/helm-vampi/values.yaml'
-    KUBE_NAMESPACE      = 'dev'
+    KUBE_NAMESPACE      = 'development'
 
     // ── Credentials ──────────────────────────────────────────
     REGISTRY_HOST       = 'index.docker.io/sfirman87'
-    REGISTRY_CRED_ID    = 'dockerhub-credentials'
-    KUBECONFIG_CRED_ID  = 'kubeconfig-dev'
-    DOCKERHUB_OCI_CRED  = 'dockerhub-oci-credentials'
+    REGISTRY_CRED_ID    = 'dockerhub-credential-id'
+    KUBECONFIG_CRED_ID  = 'kubeconfig-credential-id'
+    DOCKERHUB_OCI_CRED  = 'dockerhub-credential-id'
     GIT_CRED_ID         = 'git-credential-id'
   }
 
