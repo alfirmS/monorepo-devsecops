@@ -89,6 +89,7 @@ pipeline {
     stage('Prepare Helm') {
       steps {
         script {
+          def dateStamp = sh(script: 'date +%d%m%y', returnStdout: true).trim()
           env.CHART_VERSION = "${dateStamp}.${BUILD_NUMBER}"
 
           withCredentials([usernamePassword(
