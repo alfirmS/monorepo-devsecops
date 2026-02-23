@@ -1,7 +1,7 @@
 apiVersion: v2
 name: vampi
 description: |
-  Helm chart untuk vampi service
+  Helm chart untuk vampi service.
 type: application
 version: 0.1.0
 appVersion: "0.1.0"
