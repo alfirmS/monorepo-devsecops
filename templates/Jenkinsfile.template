@@ -5,13 +5,7 @@
 
 pipeline {
 
-  parameters {
-    string(
-      name: 'GIT_BRANCH',
-      defaultValue: '{{ DEFAULT_BRANCH }}',
-      description: 'Branch atau tag yang akan di-build'
-    )
-  }
+{{ PARAMETERS_BLOCK }}
 
   environment {
     // ── Service & ENV ────────────────────────────────────────
@@ -30,11 +24,13 @@ pipeline {
     REGISTRY_HOST       = '{{ REGISTRY_HOST }}'
     REGISTRY_CRED_ID    = '{{ REGISTRY_CRED_ID }}'
     KUBECONFIG_CRED_ID  = '{{ KUBECONFIG_CRED_ID }}'
-    DOCKERHUB_OCI_CRED  = 'dockerhub-oci-credentials'
+    DOCKERHUB_OCI_CRED  = '{{ REGISTRY_CRED_ID }}'
     GIT_CRED_ID         = '{{ GIT_CRED_ID }}'
   }
 
   agent any
+
+{{ TRIGGER_BLOCK }}
 
   stages {
 

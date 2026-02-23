@@ -22,11 +22,6 @@ pipeline {
       choices: ['dev', 'uat', 'stag', 'prod'],
       description: 'Target environment untuk job deploy yang akan dibuat'
     )
-    choice(
-      name: 'SERVICE_TYPE_K8S',
-      choices: ['backend', 'frontend'],
-      description: 'Tipe service (menentukan template Jenkinsfile yang dipakai)'
-    )
 
     // ── Networking ────────────────────────────────────────────
     string(
@@ -556,14 +551,67 @@ def getEnvFullName(String env) {
 // ════════════════════════════════════════════════════════════
 //  JENKINSFILE GENERATOR
 //  readFile Jenkinsfile.template dari monorepo
-//  → replace {{ PLACEHOLDER }} dengan nilai dari Jenkins params
+//  → inject block parameters, trigger, dan checkout branch
+//    sesuai environment:
+//
+//  dev / uat / stag:
+//    - Tidak ada parameters block
+//    - Auto trigger by SCM polling setiap push commit
+//    - Checkout branch: dev / uat / main (stag)
+//
+//  prod:
+//    - Ada parameters block (input manual GIT_BRANCH)
+//    - Tidak ada auto trigger (deploy manual)
+//    - Checkout branch: ${params.GIT_BRANCH}
 // ════════════════════════════════════════════════════════════
 
 def generateJenkinsfile(String registryCredId, String kubeConfigCredId) {
-  def env           = safe(params.ENV)
-  def service       = safe(params.SERVICE)
-  def serviceRepo   = "git@github.com:alfirmS/${service}.git"
+  def env        = safe(params.ENV)
+  def service    = safe(params.SERVICE)
+  def serviceRepo = "git@github.com:alfirmS/${service}.git"
+
+  // ── Tentukan default branch per env ──────────────────────
   def defaultBranch = (env in ['stag', 'prod']) ? 'main' : env
+
+  // ── PARAMETERS BLOCK ─────────────────────────────────────
+  // prod  → ada parameters (manual input branch/tag)
+  // lain  → tidak ada parameters block sama sekali
+  def parametersBlock = ''
+  if (env == 'prod') {
+    parametersBlock = """  parameters {
+    string(
+      name: 'GIT_BRANCH',
+      defaultValue: '${defaultBranch}',
+      description: 'Branch atau tag yang akan di-deploy ke PRODUCTION (e.g. main / v1.2.3)'
+    )
+  }
+"""
+  }
+
+  // ══ TRIGGER BLOCK ═════════════════════════════════════════════════
+  // dev / uat / stag → GitHub webhook (auto deploy on push)
+  // prod             → tidak ada trigger (manual only)
+  //
+  // Syarat webhook aktif:
+  //   1. Plugin "GitHub" terinstall di Jenkins
+  //   2. Di repo GitHub → Settings → Webhooks → tambahkan:
+  //      Payload URL : http://<jenkins-url>/github-webhook/
+  //      Content type: application/json
+  //      Event       : Just the push event
+  def triggerBlock = ''
+  if (env != 'prod') {
+    triggerBlock = """  triggers {
+    // Trigger otomatis saat ada push ke branch ${defaultBranch}
+    // Pastikan GitHub webhook sudah dikonfigurasi ke Jenkins
+    githubPush()
+  }
+"""
+  }
+
+  // ── CHECKOUT BRANCH ───────────────────────────────────────
+  // prod  → pakai ${params.GIT_BRANCH} (dari input manual)
+  // lain  → pakai branch tetap sesuai env
+  def checkoutBranch = (env == 'prod') ? '${params.GIT_BRANCH}' : defaultBranch
 
   def template = readFile("${REPO_PATH}/templates/Jenkinsfile.template")
 
@@ -577,6 +625,9 @@ def generateJenkinsfile(String registryCredId, String kubeConfigCredId) {
     .replace('{{ REGISTRY_CRED_ID }}',   registryCredId)
     .replace('{{ KUBECONFIG_CRED_ID }}', kubeConfigCredId)
     .replace('{{ GIT_CRED_ID }}',        safe(params.GIT_CRED_ID))
+    .replace('{{ PARAMETERS_BLOCK }}',   parametersBlock)
+    .replace('{{ TRIGGER_BLOCK }}',      triggerBlock)
+    .replace('{{ CHECKOUT_BRANCH }}',    checkoutBranch)
 }
 
 // ════════════════════════════════════════════════════════════
