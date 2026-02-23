@@ -28,6 +28,9 @@ pipeline {
     HELM_VALUES_PATH    = 'services/vampi/values.yaml'
     KUBE_NAMESPACE      = 'development'
 
+    // ── Docker ─────────────────────────────────────────────────
+    REGISTRY_HOST	= "index.docker.io/sfirman87"
+
     // ── Credentials ──────────────────────────────────────────
     REGISTRY_CRED_ID    = 'dockerhub-credential-id'
     KUBECONFIG_CRED_ID  = 'kubeconfig-credential-id'
