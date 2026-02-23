@@ -103,8 +103,8 @@ pipeline {
 
           // Set version & appVersion di Chart.yaml mengikuti IMAGE_TAG
           sh """
-            sed -i "s|^version:.*|version: \"${IMAGE_TAG}\"|" ${HELM_CHART_PATH}/Chart.yaml
-            sed -i "s|^appVersion:.*|appVersion: \"${IMAGE_TAG}\"|" ${HELM_CHART_PATH}/Chart.yaml
+	          sed -i "s|^version:.*|version: \\\"${IMAGE_TAG}\\\"|" ${HELM_CHART_PATH}/Chart.yaml
+            sed -i "s|^appVersion:.*|appVersion: \\\"${IMAGE_TAG}\\\"|" ${HELM_CHART_PATH}/Chart.yaml
           """
           echo "✅ Helm siap dari monorepo"
         }
