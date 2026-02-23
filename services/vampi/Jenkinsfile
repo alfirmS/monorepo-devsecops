@@ -140,6 +140,7 @@ pipeline {
             sh """
               helm upgrade --install ${SERVICE} devops-configs/${HELM_CHART_PATH} \
                 -f devops-configs/${HELM_VALUES_PATH} \
+		--set image.repository=${REGISTRY_HOST}
                 --set image.tag=${IMAGE_TAG} \
                 --namespace ${KUBE_NAMESPACE} \
                 --create-namespace \
