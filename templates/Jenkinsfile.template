@@ -120,10 +120,12 @@ pipeline {
             sh """
               helm lint ${HELM_CHART_PATH} \
                 -f ${HELM_VALUES_PATH} \
+                --set image.repository=${REGISTRY_HOST}/${SERVICE} \
                 --set image.tag=${IMAGE_TAG}
 
               helm upgrade --install ${SERVICE} ${HELM_CHART_PATH} \
                 -f ${HELM_VALUES_PATH} \
+                --set image.repository=${REGISTRY_HOST}/${SERVICE} \
                 --set image.tag=${IMAGE_TAG} \
                 --namespace ${KUBE_NAMESPACE} \
                 --dry-run --debug
@@ -133,6 +135,7 @@ pipeline {
             sh """
               helm upgrade --install ${SERVICE} ${HELM_CHART_PATH} \
                 -f ${HELM_VALUES_PATH} \
+                --set image.repository=${REGISTRY_HOST}/${SERVICE} \
                 --set image.tag=${IMAGE_TAG} \
                 --namespace ${KUBE_NAMESPACE} \
                 --create-namespace \
