@@ -69,18 +69,18 @@ pipeline {
             passwordVariable: 'REG_PASS'
           )]) {
             sh """
-              docker login -u "{REG_USER}" -p "{REG_PASS}" {REGISTRY_HOST}
+              docker login -u "${REG_USER}" -p "${REG_PASS}" ${REGISTRY_HOST}
 
               docker build \
                 -f service-src/Dockerfile \
-                -t {REGISTRY_HOST}/{SERVICE}:{IMAGE_TAG} \
+                -t ${REGISTRY_HOST}/${SERVICE}:${IMAGE_TAG} \
                 service-src/
 
-              docker push {REGISTRY_HOST}/{SERVICE}:{IMAGE_TAG}
-              docker rmi {REGISTRY_HOST}/{SERVICE}:{IMAGE_TAG} || true
+              docker push ${REGISTRY_HOST}/${SERVICE}:${IMAGE_TAG}
+              docker rmi ${REGISTRY_HOST}/${SERVICE}:${IMAGE_TAG} || true
             """
           }
-          echo "✅ Image pushed: {REGISTRY_HOST}/{SERVICE}:{IMAGE_TAG}"
+          echo "✅ Image pushed: ${REGISTRY_HOST}/${SERVICE}:${IMAGE_TAG}"
         }
       }
     }
@@ -95,15 +95,16 @@ pipeline {
             passwordVariable: 'DH_PASS'
           )]) {
             sh """
-              helm registry login registry-1.docker.io -u "{DH_USER}" -p "{DH_PASS}"
-              helm dep update {HELM_CHART_PATH}
+              helm registry login registry-1.docker.io -u "${DH_USER}" -p "${DH_PASS}"
+              helm dep update ${HELM_CHART_PATH}
               helm registry logout registry-1.docker.io
             """
           }
+
           // Set version & appVersion di Chart.yaml mengikuti IMAGE_TAG
           sh """
-            sed -i "s/^version:.*/version: {IMAGE_TAG}/" {HELM_CHART_PATH}/Chart.yaml
-            sed -i "s/^appVersion:.*/appVersion: \\"{IMAGE_TAG}\\"/" {HELM_CHART_PATH}/Chart.yaml
+            sed -i "s/^version:.*/version: ${IMAGE_TAG}/" ${HELM_CHART_PATH}/Chart.yaml
+            sed -i "s/^appVersion:.*/appVersion: \\"${IMAGE_TAG}\\"/" ${HELM_CHART_PATH}/Chart.yaml
           """
           echo "✅ Helm siap dari monorepo"
         }
@@ -117,23 +118,23 @@ pipeline {
           withCredentials([file(credentialsId: env.KUBECONFIG_CRED_ID, variable: 'KUBECONFIG')]) {
 
             sh """
-              helm lint {HELM_CHART_PATH} \
-                -f {HELM_VALUES_PATH} \
-                --set image.tag={IMAGE_TAG}
+              helm lint ${HELM_CHART_PATH} \
+                -f ${HELM_VALUES_PATH} \
+                --set image.tag=${IMAGE_TAG}
 
-              helm upgrade --install {SERVICE} {HELM_CHART_PATH} \
-                -f {HELM_VALUES_PATH} \
-                --set image.tag={IMAGE_TAG} \
-                --namespace {KUBE_NAMESPACE} \
+              helm upgrade --install ${SERVICE} ${HELM_CHART_PATH} \
+                -f ${HELM_VALUES_PATH} \
+                --set image.tag=${IMAGE_TAG} \
+                --namespace ${KUBE_NAMESPACE} \
                 --dry-run --debug
             """
             echo "✅ Helm lint & dry-run OK"
 
             sh """
-              helm upgrade --install {SERVICE} {HELM_CHART_PATH} \
-                -f {HELM_VALUES_PATH} \
-                --set image.tag={IMAGE_TAG} \
-                --namespace {KUBE_NAMESPACE} \
+              helm upgrade --install ${SERVICE} ${HELM_CHART_PATH} \
+                -f ${HELM_VALUES_PATH} \
+                --set image.tag=${IMAGE_TAG} \
+                --namespace ${KUBE_NAMESPACE} \
                 --create-namespace \
                 --atomic \
                 --timeout 5m \
@@ -152,15 +153,15 @@ pipeline {
           withCredentials([file(credentialsId: env.KUBECONFIG_CRED_ID, variable: 'KUBECONFIG')]) {
             sh """
               echo "─── Rollout Status ───"
-              kubectl rollout status deployment/{SERVICE} \
-                -n {KUBE_NAMESPACE} --timeout=3m
+              kubectl rollout status deployment/${SERVICE} \
+                -n ${KUBE_NAMESPACE} --timeout=3m
 
               echo "─── Pods ───"
-              kubectl get pods -n {KUBE_NAMESPACE} -l app.kubernetes.io/name={SERVICE} -o wide
+              kubectl get pods -n ${KUBE_NAMESPACE} -l app.kubernetes.io/name=${SERVICE} -o wide
 
               echo "─── Recent Events ───"
-              kubectl get events -n {KUBE_NAMESPACE} \
-                --field-selector involvedObject.name={SERVICE} \
+              kubectl get events -n ${KUBE_NAMESPACE} \
+                --field-selector involvedObject.name=${SERVICE} \
                 --sort-by='.lastTimestamp' | tail -10
             """
           }
@@ -183,7 +184,7 @@ pipeline {
         echo "❌ Deploy gagal, mencoba rollback..."
         withCredentials([file(credentialsId: env.KUBECONFIG_CRED_ID, variable: 'KUBECONFIG')]) {
           sh """
-            helm rollback {SERVICE} 0 -n {KUBE_NAMESPACE} || true
+            helm rollback ${SERVICE} 0 -n ${KUBE_NAMESPACE} || true
           """
         }
       }
