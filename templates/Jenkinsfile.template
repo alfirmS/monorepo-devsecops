@@ -61,7 +61,7 @@ pipeline {
         script {
           def commitId  = sh(script: 'git -C service-src rev-parse --short HEAD', returnStdout: true).trim()
           def dateStamp = sh(script: 'date +%d%m%y', returnStdout: true).trim()
-          env.IMAGE_TAG = "${commitId}-${dateStamp}-${BUILD_NUMBER}"
+          env.IMAGE_TAG = "${commitId}.${dateStamp}.${BUILD_NUMBER}"
 
           withCredentials([usernamePassword(
             credentialsId: env.REGISTRY_CRED_ID,
