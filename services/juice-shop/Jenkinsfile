@@ -28,7 +28,7 @@ pipeline {
 
     // ── Credentials ──────────────────────────────────────────
     REGISTRY_HOST       = 'index.docker.io/sfirman87'
-    REGISTRY_CRED_ID    = 'dockerhub-credential-id'
+    REGISTRY_CRED_ID    = 'harbor-registry-credentials'
     KUBECONFIG_CRED_ID  = 'kubeconfig-dev'
     DOCKERHUB_OCI_CRED  = 'dockerhub-oci-credentials'
     GIT_CRED_ID         = 'git-credential-id'
