@@ -170,33 +170,37 @@ spec:
     // docker login + docker build + docker push
     // → diganti kaniko executor (tidak butuh Docker daemon)
     // → container('kaniko') eksplisit karena butuh /busybox/sh
+
     stage('Build & Push Image') {
       steps {
-        container('kaniko') {
-          script {
-            def commitId  = sh(script: 'git -C service-src rev-parse --short HEAD', returnStdout: true).trim()
-            def dateStamp = sh(script: 'date +%d%m%y', returnStdout: true).trim()
-            env.IMAGE_TAG = "${commitId}.${dateStamp}.${BUILD_NUMBER}"
+        script {
+          // ── Jalankan di jnlp (defaultContainer) ──
+          // jnlp punya git (dari inbound-agent base image)
+          def commitId  = sh(script: 'git -C service-src rev-parse --short HEAD', returnStdout: true).trim()
+          def dateStamp = sh(script: 'date +%d%m%y', returnStdout: true).trim()
+          env.IMAGE_TAG = "${commitId}.${dateStamp}.${BUILD_NUMBER}"
+          echo "IMAGE_TAG: ${env.IMAGE_TAG}"
+        }
 
-            // Kaniko membaca kredensial registry dari /kaniko/.docker/config.json
-            // yang sudah di-mount dari secret harbor-regcred via projected volume.
-            // Tidak perlu docker login manual.
-            sh """
-              /kaniko/executor \
-                --context=dir://service-src \
-                --dockerfile=service-src/Dockerfile \
-                --destination=${REGISTRY_HOST}/${SERVICE}:${IMAGE_TAG} \
-                --cache=true \
-                --cache-ttl=24h \
-                --compressed-caching=false \
-                --snapshot-mode=redo
-            """
-            echo "Image pushed: ${REGISTRY_HOST}/${SERVICE}:${IMAGE_TAG}"
-          }
+        container('kaniko') {
+          // ── Jalankan di kaniko ──
+          // env.IMAGE_TAG sudah di-set di step sebelumnya, tersedia di semua container
+          // Kaniko membaca /kaniko/.docker/config.json dari projected volume harbor-regcred
+          sh """
+            /kaniko/executor \
+              --context=dir://\${WORKSPACE}/service-src \
+              --dockerfile=\${WORKSPACE}/service-src/Dockerfile \
+              --destination=${REGISTRY_HOST}/${SERVICE}:${IMAGE_TAG} \
+              --cache=true \
+              --cache-ttl=24h \
+              --compressed-caching=false \
+              --snapshot-mode=redo
+          """
+          echo "Image pushed: ${REGISTRY_HOST}/${SERVICE}:${IMAGE_TAG}"
         }
       }
     }
-
+    
     // ── 3. Prepare Helm ──────────────────────────────────────
     // helm registry login + helm dep update + sed Chart.yaml
     // → container('helm') karena butuh helm binary
