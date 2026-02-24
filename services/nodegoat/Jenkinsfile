@@ -23,7 +23,7 @@ pipeline {
     // ── Credentials ──────────────────────────────────────────
     REGISTRY_HOST       = 'index.docker.io/sfirman87'
     REGISTRY_CRED_ID    = 'dockerhub-credential-id'
-    KUBECONFIG_CRED_ID  = 'kubeconfig-dev'
+    KUBECONFIG_CRED_ID  = 'kubeconfig-credential-id'
     DOCKERHUB_OCI_CRED  = 'dockerhub-credential-id'
     GIT_CRED_ID         = 'git-credential-id'
   }
@@ -79,7 +79,7 @@ spec:
     runAsGroup: 0
 
   imagePullSecrets:
-    - name: harbor-regcred
+    - name: regcred
 
   containers:
 
@@ -97,7 +97,7 @@ spec:
         - name: GODEBUG
           value: "http2client=0"
       volumeMounts:
-        - name: harbor-regcred
+        - name: regcred
           mountPath: /kaniko/.docker
       resources:
         requests:

@@ -79,7 +79,7 @@ pipeline {
 		runAsGroup: 0
 
 	      imagePullSecrets:
-		- name: harbor-regcred
+		- name: regcred
 
 	      containers:
 
@@ -97,7 +97,7 @@ pipeline {
 		    - name: GODEBUG
 		      value: "http2client=0"
 		  volumeMounts:
-		    - name: harbor-regcred
+		    - name: regcred
 		      mountPath: /kaniko/.docker
 		  resources:
 		    requests:
