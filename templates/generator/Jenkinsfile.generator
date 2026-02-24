@@ -1,111 +1,41 @@
 // ============================================================
-//  JOB GENERATOR PIPELINE
-//  Clones starter-helm values.yaml → patch sesuai parameter
-//  Output : values.yaml (patched) + Jenkinsfile
-//  Commits to: monorepo-devops/services/$SERVICE/
-//  Creates:    Jenkins job pointing ke SCM Jenkinsfile
-//  Jenkins version: 2.541.1
+//  JOB GENERATOR PIPELINE — Kubernetes agent (jnlp auto-inject)
+//  Jenkins 2.541.1 | Kubernetes plugin
 // ============================================================
 
 pipeline {
 
   parameters {
+    string(name: 'SERVICE',         defaultValue: '', description: 'Service name, lowercase alphanumeric & hyphens only (e.g. payment-api)')
+    choice(name: 'ENV',             choices: ['dev', 'uat', 'stag', 'prod'], description: 'Target environment')
+    string(name: 'CONTAINER_PORT',  defaultValue: '8080', description: 'Port yang di-expose container')
+    choice(name: 'K8S_SERVICE_TYPE',choices: ['ClusterIP', 'LoadBalancer', 'NodePort'], description: 'Kubernetes Service type')
 
-    // ── Service Identity ──────────────────────────────────────
-    string(
-      name: 'SERVICE',
-      defaultValue: '',
-      description: 'Service name, lowercase alphanumeric & hyphens only (e.g. payment-api)'
-    )
-    choice(
-      name: 'ENV',
-      choices: ['dev', 'uat', 'stag', 'prod'],
-      description: 'Target environment untuk job deploy yang akan dibuat'
-    )
-
-    // ── Networking ────────────────────────────────────────────
-    string(
-      name: 'CONTAINER_PORT',
-      defaultValue: '8080',
-      description: 'Port yang di-expose container'
-    )
-    choice(
-      name: 'K8S_SERVICE_TYPE',
-      choices: ['ClusterIP', 'LoadBalancer', 'NodePort'],
-      description: 'Kubernetes Service type'
-    )
-
-    // ── Resources ─────────────────────────────────────────────
-    choice(
-      name: 'RESOURCE_PRESET',
-      choices: ['small', 'medium', 'large', 'xlarge', 'custom'],
-      description: '''Resource preset:
-  small  = 500m/512Mi  | request 250m/256Mi
-  medium = 1/1Gi       | request 500m/512Mi
-  large  = 2/2Gi       | request 1/1Gi
-  xlarge = 4/4Gi       | request 2/2Gi
-  custom = isi manual di bawah'''
-    )
+    choice(name: 'RESOURCE_PRESET', choices: ['small', 'medium', 'large', 'xlarge', 'custom'],
+      description: 'small=500m/512Mi | medium=1/1Gi | large=2/2Gi | xlarge=4/4Gi | custom=manual')
     string(name: 'CUSTOM_CPU_LIMIT',    defaultValue: '500m',  description: '[Custom] CPU limit')
     string(name: 'CUSTOM_CPU_REQUEST',  defaultValue: '250m',  description: '[Custom] CPU request')
     string(name: 'CUSTOM_MEM_LIMIT',    defaultValue: '512Mi', description: '[Custom] Memory limit')
     string(name: 'CUSTOM_MEM_REQUEST',  defaultValue: '256Mi', description: '[Custom] Memory request')
 
-    // ── HPA ───────────────────────────────────────────────────
-    booleanParam(
-      name: 'HPA_ENABLED',
-      defaultValue: false,
-      description: 'Enable HorizontalPodAutoscaler'
-    )
+    booleanParam(name: 'HPA_ENABLED',             defaultValue: false, description: 'Enable HorizontalPodAutoscaler')
     string(name: 'HPA_MIN_REPLICAS',  defaultValue: '1',  description: 'HPA min replicas')
     string(name: 'HPA_MAX_REPLICAS',  defaultValue: '10', description: 'HPA max replicas')
     string(name: 'HPA_CPU_TARGET',    defaultValue: '70', description: 'HPA target CPU utilization (%)')
     string(name: 'HPA_MEM_TARGET',    defaultValue: '80', description: 'HPA target Memory utilization (%)')
 
-    // ── PDB ───────────────────────────────────────────────────
-    booleanParam(
-      name: 'PDB_ENABLED',
-      defaultValue: false,
-      description: 'Enable PodDisruptionBudget'
-    )
-    string(
-      name: 'PDB_MIN_AVAILABLE',
-      defaultValue: '1',
-      description: 'PDB minAvailable (angka atau persentase, e.g. "1" atau "50%")'
-    )
+    booleanParam(name: 'PDB_ENABLED',             defaultValue: false, description: 'Enable PodDisruptionBudget')
+    string(name: 'PDB_MIN_AVAILABLE', defaultValue: '1',  description: 'PDB minAvailable (angka atau %, e.g. "1" atau "50%")')
 
-    // ── External Secret ───────────────────────────────────────
-    booleanParam(
-      name: 'EXTERNAL_SECRET_ENABLED',
-      defaultValue: false,
-      description: 'Enable ExternalSecret (Vault integration)'
-    )
+    booleanParam(name: 'EXTERNAL_SECRET_ENABLED',  defaultValue: false, description: 'Enable ExternalSecret (Vault integration)')
 
-    // ── Registry & Build ──────────────────────────────────────
-    choice(
-      name: 'REGISTRY_TYPE',
-      choices: ['Harbor', 'Huawei SWR', 'Docker Hub'],
-      description: 'Container registry yang dipakai'
-    )
-    string(
-      name: 'REGISTRY_HOST',
-      defaultValue: '',
-      description: 'Registry host URL (e.g. registry.example.com atau docker.io/username)'
-    )
+    choice(name: 'REGISTRY_TYPE', choices: ['Harbor', 'Huawei SWR', 'Docker Hub'], description: 'Container registry yang dipakai')
+    string(name: 'REGISTRY_HOST', defaultValue: '', description: 'Registry host URL (e.g. harbor.example.com)')
 
-    // ── Git Credential ────────────────────────────────────────
-    choice(
-      name: 'GIT_CRED_ID',
-      choices: ['git-credential-id', 'github-ssh-key', 'bitbucket-scm-deployer'],
-      description: 'Jenkins credential ID untuk akses Git (SSH private key)'
-    )
+    choice(name: 'GIT_CRED_ID', choices: ['git-credential-id', 'github-ssh-key', 'bitbucket-scm-deployer'],
+      description: 'Jenkins credential ID untuk akses Git (sshUserPrivateKey)')
 
-    // ── Jenkins job placement ─────────────────────────────────
-    string(
-      name: 'JENKINS_FOLDER',
-      defaultValue: '',
-      description: 'Folder Jenkins tempat job deploy dibuat (kosongkan = root). Contoh: backend / frontend / backend/java'
-    )
+    string(name: 'JENKINS_FOLDER', defaultValue: '', description: 'Folder Jenkins tempat job dibuat (kosong = root). Contoh: backend/java')
   }
 
   environment {
@@ -115,11 +45,90 @@ pipeline {
     HELM_STARTER_BRANCH = 'helm-starter'
   }
 
-  agent any
+  // ════════════════════════════════════════════════════════════
+  //  KUBERNETES AGENT
+  //
+  //  Mengikuti pattern yang sama dengan pipeline production:
+  //
+  //    agent {
+  //      kubernetes {
+  //        defaultContainer 'jnlp'    ← sh() default di jnlp
+  //        yaml """
+  //          containers:
+  //          - name: maven            ← helper, command: [cat]
+  //          - name: helm             ← helper, command: [cat]
+  //          # jnlp TIDAK ditulis → auto-inject oleh plugin
+  //        """
+  //      }
+  //    }
+  //
+  //  Pod layout pipeline ini:
+  //  ┌─────────────────────────────────────────────────────┐
+  //  │  jnlp   ← TIDAK ditulis, auto-inject plugin        │
+  //  │          ← defaultContainer                         │
+  //  │          ← readFile/writeFile/script jalan di sini  │
+  //  │                                                     │
+  //  │  tools  ← helper container                          │
+  //  │          ← image: alpine/git (git + ssh bawaan)    │
+  //  │          ← command: [cat] + tty: true               │
+  //  │          ← dipanggil: container('tools') { sh '' } │
+  //  │          ← dipakai untuk: git clone, git push, curl │
+  //  └─────────────────────────────────────────────────────┘
+  //
+  //  imagePullSecrets:
+  //    Jika tools image ada di private registry, uncomment
+  //    imagePullSecrets dan buat secret di namespace jenkins:
+  //      kubectl create secret docker-registry harbor-regcred \
+  //        --docker-server=harbor.example.com \
+  //        --docker-username=robot$jenkins \
+  //        --docker-password=<token> \
+  //        --namespace=jenkins
+  // ════════════════════════════════════════════════════════════
+  agent {
+    kubernetes {
+      cloud            'kubernetes'   // ganti ke 'k3d' jika nama cloud kamu k3d
+      defaultContainer 'jnlp'        // sh() tanpa container() wrapper → jalan di jnlp
+      yaml """
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    component: ci
+    pipeline: job-generator
+spec:
+  securityContext:
+    runAsUser: 0
+    runAsGroup: 0
+
+  # Uncomment jika image ada di private registry
+  # imagePullSecrets:
+  #   - name: harbor-regcred
+
+  containers:
+    # helper container: git + ssh + curl
+    # jnlp TIDAK ditulis di sini — Kubernetes plugin inject otomatis
+    - name: tools
+      image: alpine/git:latest
+      imagePullPolicy: IfNotPresent
+      command:
+        - cat
+      tty: true
+      resources:
+        requests:
+          cpu: "200m"
+          memory: "256Mi"
+        limits:
+          cpu: "500m"
+          memory: "512Mi"
+"""
+    }
+  }
 
   stages {
 
     // ── 1. Validate ───────────────────────────────────────────
+    // Murni Groovy → jalan di jnlp (defaultContainer)
+    // Tidak butuh git/curl → tidak perlu container('tools')
     stage('Validate Parameters') {
       steps {
         script {
@@ -130,42 +139,57 @@ pipeline {
             error "SERVICE harus lowercase alphanumeric dan hyphens (min 2 karakter)."
           }
           echo "✅ Validasi parameter OK"
+          echo "   Pod: jnlp (auto-inject) + tools (alpine/git)"
         }
       }
     }
 
-    // ── 2. Clone Devops Repo ──────────────────────────────────
+    // ── 2. Clone DevOps Repo ──────────────────────────────────
+    // Butuh git + ssh → eksplisit container('tools')
     stage('Clone DevOps Repo') {
       steps {
-        cleanWs()
-        script {
-          withCredentials([sshUserPrivateKey(credentialsId: params.GIT_CRED_ID, keyFileVariable: 'SSH_KEY')]) {
-            sh """
-              export GIT_SSH_COMMAND="ssh -i \${SSH_KEY} -o StrictHostKeyChecking=no"
-              git clone --branch ${DEVOPS_BRANCH} ${DEVOPS_REPO_SSH} ${REPO_PATH}
-            """
+        container('tools') {
+          script {
+            withCredentials([sshUserPrivateKey(credentialsId: params.GIT_CRED_ID, keyFileVariable: 'SSH_KEY')]) {
+              sh """
+                apk add --no-cache curl openssh-client 2>/dev/null || true
+                mkdir -p /root/.ssh
+                cp \${SSH_KEY} /root/.ssh/id_rsa
+                chmod 600 /root/.ssh/id_rsa
+                ssh-keyscan -H github.com >> /root/.ssh/known_hosts 2>/dev/null
+                git clone --branch ${DEVOPS_BRANCH} ${DEVOPS_REPO_SSH} ${REPO_PATH}
+              """
+            }
+            echo "✅ Repo di-clone dari branch ${DEVOPS_BRANCH}"
           }
-          echo "✅ Repo di-clone dari branch ${DEVOPS_BRANCH}"
         }
       }
     }
 
     // ── 3. Clone Starter Helm ─────────────────────────────────
+    // Butuh git → container('tools')
+    // /root/.ssh sudah ada dari stage sebelumnya (persist dalam pod)
     stage('Clone Starter Helm') {
       steps {
-        script {
-          withCredentials([sshUserPrivateKey(credentialsId: params.GIT_CRED_ID, keyFileVariable: 'SSH_KEY')]) {
-            sh """
-              export GIT_SSH_COMMAND="ssh -i \${SSH_KEY} -o StrictHostKeyChecking=no"
-              git clone --branch ${HELM_STARTER_BRANCH} --single-branch ${DEVOPS_REPO_SSH} helm-starter-tmp
-            """
+        container('tools') {
+          script {
+            withCredentials([sshUserPrivateKey(credentialsId: params.GIT_CRED_ID, keyFileVariable: 'SSH_KEY')]) {
+              sh """
+                cp \${SSH_KEY} /root/.ssh/id_rsa
+                chmod 600 /root/.ssh/id_rsa
+                git clone --branch ${HELM_STARTER_BRANCH} --single-branch \
+                  ${DEVOPS_REPO_SSH} helm-starter-tmp
+              """
+            }
+            echo "✅ Starter helm di-clone dari branch ${HELM_STARTER_BRANCH}"
           }
-          echo "✅ Starter helm di-clone dari branch ${HELM_STARTER_BRANCH}"
         }
       }
     }
 
     // ── 4. Prepare Service Directory ──────────────────────────
+    // sh mkdir/cp/rm  → container('tools')
+    // readFile/writeFile (Jenkins built-in step) → tidak butuh container() wrapper
     stage('Prepare Service Directory') {
       steps {
         script {
@@ -173,15 +197,16 @@ pipeline {
           def serviceDir  = "${REPO_PATH}/services/${service}"
           def helmDestDir = "${serviceDir}/helm-${service}"
 
-          // Buat service dir, hapus helm dir lama jika sudah ada (clean replace)
-          sh """
-            mkdir -p ${serviceDir}
-            rm -rf ${helmDestDir}
-            mkdir -p ${helmDestDir}
-            cp -r helm-starter-tmp/starter-helm/. ${helmDestDir}/
-          """
+          container('tools') {
+            sh """
+              mkdir -p ${serviceDir}
+              rm -rf ${helmDestDir}
+              mkdir -p ${helmDestDir}
+              cp -r helm-starter-tmp/starter-helm/. ${helmDestDir}/
+            """
+          }
 
-          // Replace {{ SERVICE }} placeholder di Chart.yaml
+          // readFile/writeFile: Jenkins step, otomatis jalan di defaultContainer (jnlp)
           def chartYaml = readFile("${helmDestDir}/Chart.yaml")
           writeFile file: "${helmDestDir}/Chart.yaml", text: chartYaml
             .replace('{{ SERVICE }}', service)
@@ -192,49 +217,49 @@ pipeline {
     }
 
     // ── 5. Patch Values & Generate Jenkinsfile ────────────────
+    // Murni readFile/writeFile + Groovy string replace
+    // → jalan di jnlp (defaultContainer), tidak butuh tools
     stage('Patch Values & Generate Jenkinsfile') {
       steps {
         script {
-          def service     = params.SERVICE
-          def serviceDir  = "${REPO_PATH}/services/${service}"
-          def helmDestDir = "${serviceDir}/helm-${service}"
-
+          def service          = params.SERVICE
+          def serviceDir       = "${REPO_PATH}/services/${service}"
+          def helmDestDir      = "${serviceDir}/helm-${service}"
           def resources        = resolveResources()
           def registryCredId   = getRegistryCredentialId()
           def kubeConfigCredId = getKubeConfigCredentialId()
           def env              = params.ENV
 
-          // Baca values.yaml dari helm chart yang sudah di-copy
           def defaultValues = readFile("${helmDestDir}/values.yaml")
-
-          // Patch values → simpan ke dalam helm chart directory
           def patchedValues = patchHelmValues(defaultValues, env, resources)
           writeFile file: "${helmDestDir}/values.yaml", text: patchedValues
-          echo "✅ values.yaml di-patch di dalam helm-${service}/"
+          echo "✅ values.yaml di-patch"
 
-          // Generate Jenkinsfile dari template
           def jenkinsfileContent = generateJenkinsfile(registryCredId, kubeConfigCredId)
           writeFile file: "${serviceDir}/Jenkinsfile", text: jenkinsfileContent
-          echo "✅ Jenkinsfile di-generate dari templates/Jenkinsfile.template"
+          echo "✅ Jenkinsfile di-generate"
         }
       }
     }
 
     // ── 6. Push to DevOps Repo ────────────────────────────────
+    // Butuh git → container('tools')
     stage('Push to DevOps Repo') {
       steps {
-        script {
-          dir(REPO_PATH) {
-            withCredentials([sshUserPrivateKey(credentialsId: params.GIT_CRED_ID, keyFileVariable: 'SSH_KEY')]) {
-              sh """
-                export GIT_SSH_COMMAND="ssh -i \${SSH_KEY} -o StrictHostKeyChecking=no"
-                git config user.email "jenkins@company.com"
-                git config user.name "Jenkins Service Generator"
-                git add services/${params.SERVICE}/
-                if git diff --staged --quiet; then
-                  echo "⚠️  Tidak ada perubahan, skip commit"
-                else
-                  git commit -m "feat: init service ${params.SERVICE} [${params.ENV}]
+        container('tools') {
+          script {
+            dir(REPO_PATH) {
+              withCredentials([sshUserPrivateKey(credentialsId: params.GIT_CRED_ID, keyFileVariable: 'SSH_KEY')]) {
+                sh """
+                  cp \${SSH_KEY} /root/.ssh/id_rsa
+                  chmod 600 /root/.ssh/id_rsa
+                  git config user.email "jenkins@company.com"
+                  git config user.name "Jenkins Service Generator"
+                  git add services/${params.SERVICE}/
+                  if git diff --staged --quiet; then
+                    echo "⚠️  Tidak ada perubahan, skip commit"
+                  else
+                    git commit -m "feat: init service ${params.SERVICE} [${params.ENV}]
 
 - helm-${params.SERVICE}/ (copied from starter-helm)
 - helm-${params.SERVICE}/values.yaml (patched untuk ${params.ENV})
@@ -242,48 +267,49 @@ pipeline {
 - HPA: ${params.HPA_ENABLED}
 - PDB: ${params.PDB_ENABLED}
 - ExternalSecret: ${params.EXTERNAL_SECRET_ENABLED}"
-                  git push origin ${DEVOPS_BRANCH}
-                fi
-              """
+                    git push origin ${DEVOPS_BRANCH}
+                  fi
+                """
+              }
             }
+            echo "✅ Config di-push ke monorepo devops"
           }
-          echo "✅ Config di-push ke monorepo devops"
         }
       }
     }
 
     // ── 7. Create Jenkins Deploy Job ──────────────────────────
+    // Butuh curl → container('tools')
     stage('Create Jenkins Deploy Job') {
       steps {
-        script {
-          withCredentials([usernamePassword(
-            credentialsId: 'jenkins-api-user',
-            usernameVariable: 'JENKINS_USER',
-            passwordVariable: 'JENKINS_TOKEN'
-          )]) {
+        container('tools') {
+          script {
+            withCredentials([usernamePassword(
+              credentialsId: 'jenkins-api-user',
+              usernameVariable: 'JENKINS_USER',
+              passwordVariable: 'JENKINS_TOKEN'
+            )]) {
 
-            // ── A. Buat folder jika JENKINS_FOLDER diisi ───────
-            def folderPath = ''
-            if (params.JENKINS_FOLDER?.trim()) {
-              // Support nested folder: "backend/java" → buat tier per tier
-              def folderParts = params.JENKINS_FOLDER.trim().split('/')
-              def currentBase = "${JENKINS_URL}"
+              // ── A. Buat folder jika JENKINS_FOLDER diisi ───────
+              def folderPath = ''
+              if (params.JENKINS_FOLDER?.trim()) {
+                def folderParts = params.JENKINS_FOLDER.trim().split('/')
+                def currentBase = "${JENKINS_URL}"
 
-              folderParts.each { part ->
-                def encodedPart = part.trim()
-                def checkStatus = sh(
-                  script: """
-                    curl -s -o /dev/null -w "%{http_code}" \
-                      --user "${JENKINS_USER}:${JENKINS_TOKEN}" \
-                      "${currentBase}job/${encodedPart}/api/json"
-                  """,
-                  returnStdout: true
-                ).trim()
+                folderParts.each { part ->
+                  def encodedPart = part.trim()
+                  def checkStatus = sh(
+                    script: """
+                      curl -s -o /dev/null -w "%{http_code}" \
+                        --user "${JENKINS_USER}:${JENKINS_TOKEN}" \
+                        "${currentBase}job/${encodedPart}/api/json"
+                    """,
+                    returnStdout: true
+                  ).trim()
 
-                if (checkStatus == '404') {
-                  echo "📁 Folder '${encodedPart}' belum ada, membuat..."
-
-                  def folderXml = """<?xml version='1.0' encoding='UTF-8'?>
+                  if (checkStatus == '404') {
+                    echo "📁 Folder '${encodedPart}' belum ada, membuat..."
+                    def folderXml = """<?xml version='1.0' encoding='UTF-8'?>
 <com.cloudbees.hudson.plugins.folder.Folder plugin="cloudbees-folder@6.15">
   <description>Auto-generated folder for ${encodedPart}</description>
   <views>
@@ -299,109 +325,96 @@ pipeline {
   <healthMetrics/>
 </com.cloudbees.hudson.plugins.folder.Folder>"""
 
-                  writeFile file: "folder-config-${encodedPart}.xml", text: folderXml
+                    writeFile file: "folder-config-${encodedPart}.xml", text: folderXml
+                    def createFolderStatus = sh(
+                      script: """
+                        curl -s -o /tmp/folder-create-response.txt -w "%{http_code}" \
+                          -X POST "${currentBase}createItem?name=${encodedPart}" \
+                          --user "${JENKINS_USER}:${JENKINS_TOKEN}" \
+                          --header "Content-Type: application/xml" \
+                          --data-binary @folder-config-${encodedPart}.xml
+                      """,
+                      returnStdout: true
+                    ).trim()
 
-                  def createFolderStatus = sh(
-                    script: """
-                      curl -s -o /tmp/folder-create-response.txt -w "%{http_code}" \
-                        -X POST "${currentBase}createItem?name=${encodedPart}" \
-                        --user "${JENKINS_USER}:${JENKINS_TOKEN}" \
-                        --header "Content-Type: application/xml" \
-                        --data-binary @folder-config-${encodedPart}.xml
-                    """,
-                    returnStdout: true
-                  ).trim()
+                    if (createFolderStatus in ['200', '201']) {
+                      echo "✅ Folder '${encodedPart}' berhasil dibuat"
+                    } else {
+                      sh 'cat /tmp/folder-create-response.txt || true'
+                      error "❌ Gagal membuat folder '${encodedPart}', HTTP: ${createFolderStatus}"
+                    }
 
-                  if (createFolderStatus in ['200', '201']) {
-                    echo "✅ Folder '${encodedPart}' berhasil dibuat"
+                  } else if (checkStatus == '200') {
+                    echo "⏭️  Folder '${encodedPart}' sudah ada, skip"
                   } else {
-                    sh 'cat /tmp/folder-create-response.txt || true'
-                    error "❌ Gagal membuat folder '${encodedPart}', HTTP: ${createFolderStatus}"
+                    error "❌ Unexpected HTTP ${checkStatus} saat check folder '${encodedPart}'"
                   }
+                  currentBase = "${currentBase}job/${encodedPart}/"
+                }
+                folderPath = folderParts.collect { "job/${it.trim()}" }.join('/') + '/'
+              }
 
-                } else if (checkStatus == '200') {
-                  echo "⏭️  Folder '${encodedPart}' sudah ada, skip"
+              // ── B. Render job-config.xml dari template ─────────
+              echo "📄 Membaca template dari ${REPO_PATH}/templates/job-config.xml"
+              def jobXmlTemplate = readFile("${REPO_PATH}/templates/job-config.xml")
+              def jobXml         = generateJobXml(jobXmlTemplate)
+              writeFile file: 'job-config-rendered.xml', text: jobXml
+
+              // ── C. Create atau Update Jenkins Job ──────────────
+              def jobName   = params.SERVICE
+              def checkUrl  = "${JENKINS_URL}${folderPath}job/${jobName}/api/json"
+              def createUrl = "${JENKINS_URL}${folderPath}createItem?name=${jobName}"
+              def updateUrl = "${JENKINS_URL}${folderPath}job/${jobName}/config.xml"
+
+              def jobCheckStatus = sh(
+                script: """curl -s -o /dev/null -w "%{http_code}" --user "${JENKINS_USER}:${JENKINS_TOKEN}" "${checkUrl}" """,
+                returnStdout: true
+              ).trim()
+
+              if (jobCheckStatus == '404') {
+                echo "🆕 Job '${jobName}' belum ada, membuat..."
+                def createStatus = sh(
+                  script: """
+                    curl -s -o /tmp/job-create-response.txt -w "%{http_code}" \
+                      -X POST "${createUrl}" \
+                      --user "${JENKINS_USER}:${JENKINS_TOKEN}" \
+                      --header "Content-Type: application/xml" \
+                      --data-binary @job-config-rendered.xml
+                  """,
+                  returnStdout: true
+                ).trim()
+                if (createStatus in ['200', '201']) {
+                  echo "✅ Jenkins job '${jobName}' berhasil dibuat"
                 } else {
-                  error "❌ Unexpected HTTP ${checkStatus} saat check folder '${encodedPart}'"
+                  sh 'cat /tmp/job-create-response.txt || true'
+                  error "❌ Gagal create job '${jobName}', HTTP: ${createStatus}"
                 }
 
-                currentBase = "${currentBase}job/${encodedPart}/"
-              }
+              } else if (jobCheckStatus == '200') {
+                echo "♻️  Job '${jobName}' sudah ada, update config..."
+                def updateStatus = sh(
+                  script: """
+                    curl -s -o /tmp/job-update-response.txt -w "%{http_code}" \
+                      -X POST "${updateUrl}" \
+                      --user "${JENKINS_USER}:${JENKINS_TOKEN}" \
+                      --header "Content-Type: application/xml" \
+                      --data-binary @job-config-rendered.xml
+                  """,
+                  returnStdout: true
+                ).trim()
+                if (updateStatus in ['200', '201']) {
+                  echo "✅ Config job '${jobName}' berhasil diupdate"
+                } else {
+                  sh 'cat /tmp/job-update-response.txt || true'
+                  error "❌ Gagal update config job '${jobName}', HTTP: ${updateStatus}"
+                }
 
-              folderPath = folderParts.collect { "job/${it.trim()}" }.join('/') + '/'
-            }
-
-            // ── B. Baca template job-config.xml dari monorepo ──
-            // Template statis ada di: monorepo/templates/job-config.xml
-            // Placeholder di-replace di sini, hasil TIDAK di-push ke repo
-            echo "📄 Membaca template dari ${REPO_PATH}/templates/job-config.xml"
-            def jobXmlTemplate = readFile("${REPO_PATH}/templates/job-config.xml")
-            def jobXml         = generateJobXml(jobXmlTemplate)
-            writeFile file: 'job-config-rendered.xml', text: jobXml
-
-            // ── C. Create atau Update Jenkins Job ──────────────
-            def jobName   = params.SERVICE
-            def checkUrl  = "${JENKINS_URL}${folderPath}job/${jobName}/api/json"
-            def createUrl = "${JENKINS_URL}${folderPath}createItem?name=${jobName}"
-            def updateUrl = "${JENKINS_URL}${folderPath}job/${jobName}/config.xml"
-
-            // Cek apakah job sudah ada via /api/json
-            def jobCheckStatus = sh(
-              script: """
-                curl -s -o /dev/null -w "%{http_code}" \
-                  --user "${JENKINS_USER}:${JENKINS_TOKEN}" \
-                  "${checkUrl}"
-              """,
-              returnStdout: true
-            ).trim()
-
-            if (jobCheckStatus == '404') {
-              // Job belum ada → create baru
-              echo "🆕 Job '${jobName}' belum ada, membuat..."
-              def createStatus = sh(
-                script: """
-                  curl -s -o /tmp/job-create-response.txt -w "%{http_code}" \
-                    -X POST "${createUrl}" \
-                    --user "${JENKINS_USER}:${JENKINS_TOKEN}" \
-                    --header "Content-Type: application/xml" \
-                    --data-binary @job-config-rendered.xml
-                """,
-                returnStdout: true
-              ).trim()
-
-              if (createStatus in ['200', '201']) {
-                echo "✅ Jenkins job '${jobName}' berhasil dibuat"
               } else {
-                sh 'cat /tmp/job-create-response.txt || true'
-                error "❌ Gagal create job '${jobName}', HTTP: ${createStatus}"
+                error "❌ Unexpected HTTP ${jobCheckStatus} saat check job '${jobName}'"
               }
 
-            } else if (jobCheckStatus == '200') {
-              // Job sudah ada → update config saja
-              echo "♻️  Job '${jobName}' sudah ada, update config..."
-              def updateStatus = sh(
-                script: """
-                  curl -s -o /tmp/job-update-response.txt -w "%{http_code}" \
-                    -X POST "${updateUrl}" \
-                    --user "${JENKINS_USER}:${JENKINS_TOKEN}" \
-                    --header "Content-Type: application/xml" \
-                    --data-binary @job-config-rendered.xml
-                """,
-                returnStdout: true
-              ).trim()
-
-              if (updateStatus in ['200', '201']) {
-                echo "✅ Config job '${jobName}' berhasil diupdate"
-              } else {
-                sh 'cat /tmp/job-update-response.txt || true'
-                error "❌ Gagal update config job '${jobName}', HTTP: ${updateStatus}"
-              }
-
-            } else {
-              error "❌ Unexpected HTTP ${jobCheckStatus} saat check job '${jobName}'"
+              echo "🔗 Jenkins Job: ${JENKINS_URL}${folderPath}job/${jobName}"
             }
-
-            echo "🔗 Jenkins Job: ${JENKINS_URL}/${folderPath}job/${jobName}"
           }
         }
       }
@@ -416,34 +429,33 @@ pipeline {
           : ''
         echo """
 ╔══════════════════════════════════════════════════════╗
-║           ✅ SERVICE GENERATOR SELESAI               ║
+║           SERVICE GENERATOR SELESAI                  ║
 ╚══════════════════════════════════════════════════════╝
 
-📦 Service   : ${params.SERVICE}
-🌍 ENV target: ${params.ENV}
-📁 Lokasi    : monorepo-devsecops/services/${params.SERVICE}/
+ Service   : ${params.SERVICE}
+ ENV target: ${params.ENV}
+ Agent     : Kubernetes pod
+             jnlp  (auto-inject plugin, defaultContainer)
+             tools (alpine/git)
 
-📄 Files yang di-generate:
+ Files:
    services/${params.SERVICE}/
-   ├── Jenkinsfile
-   └── helm-${params.SERVICE}/
-       ├── Chart.yaml
-       ├── values.yaml       ← patched dari starter default
-       └── templates/
+   Jenkinsfile
+   helm-${params.SERVICE}/Chart.yaml
+   helm-${params.SERVICE}/values.yaml (patched)
+   helm-${params.SERVICE}/templates/
 
-📋 Template yang dipakai:
-   templates/Jenkinsfile.template  → Jenkinsfile service
-   templates/job-config.xml        → Jenkins job config (tidak di-push)
-
-🔗 Jenkins Job: ${JENKINS_URL}${folderSegment}job/${params.SERVICE}
+ Job: ${JENKINS_URL}${folderSegment}job/${params.SERVICE}
         """
       }
     }
     failure {
-      echo "❌ Service generation gagal. Cek log di atas."
+      echo "Service generation gagal. Cek log di atas."
     }
     cleanup {
-      sh 'rm -rf helm-starter-tmp || true'
+      container('tools') {
+        sh 'rm -rf helm-starter-tmp || true'
+      }
       deleteDir()
     }
   }
@@ -490,52 +502,31 @@ def getKubeConfigCredentialId() {
   }
 }
 
-// ════════════════════════════════════════════════════════════
-//  VALUES PATCHER
-//  Baca values.yaml dari starter (sudah ada {{ PLACEHOLDER }})
-//  → replace semua placeholder dengan nilai dari Jenkins params
-//  → tidak ada parsing YAML, cukup string replace
-// ════════════════════════════════════════════════════════════
-
 def patchHelmValues(String template, String env, Map resources) {
   def result = template
-    // ── Global ──────────────────────────────────────────────
     .replace('{{ GLOBAL_ENV }}',              getEnvFullName(env))
-
-    // ── Image ────────────────────────────────────────────────
     .replace('"{{ IMAGE_REPOSITORY }}"',      '""')
     .replace('"{{ IMAGE_TAG }}"',             '""')
-
-    // ── Service ──────────────────────────────────────────────
     .replace('{{ SERVICE_TYPE }}',            safe(params.K8S_SERVICE_TYPE))
     .replace('{{ CONTAINER_PORT }}',          safe(params.CONTAINER_PORT))
-
-    // ── Resources ────────────────────────────────────────────
     .replace('"{{ CPU_LIMIT }}"',             "\"${resources.cpuLimit}\"")
     .replace('"{{ MEM_LIMIT }}"',             "\"${resources.memLimit}\"")
     .replace('"{{ CPU_REQUEST }}"',           "\"${resources.cpuRequest}\"")
     .replace('"{{ MEM_REQUEST }}"',           "\"${resources.memRequest}\"")
-
-    // ── HPA ──────────────────────────────────────────────────
     .replace('{{ HPA_ENABLED }}',             safe(params.HPA_ENABLED))
     .replace('{{ HPA_MIN_REPLICAS }}',        safe(params.HPA_MIN_REPLICAS))
     .replace('{{ HPA_MAX_REPLICAS }}',        safe(params.HPA_MAX_REPLICAS))
     .replace('{{ HPA_CPU_TARGET }}',          safe(params.HPA_CPU_TARGET))
     .replace('{{ HPA_MEM_TARGET }}',          safe(params.HPA_MEM_TARGET))
-
-    // ── PDB ──────────────────────────────────────────────────
     .replace('{{ PDB_ENABLED }}',             safe(params.PDB_ENABLED))
     .replace('{{ PDB_MIN_AVAILABLE }}',       safe(params.PDB_MIN_AVAILABLE))
-
-    // ── External Secret ──────────────────────────────────────
     .replace('{{ EXTERNAL_SECRET_ENABLED }}', safe(params.EXTERNAL_SECRET_ENABLED))
 
-  def header = """# ================================================================
-# Helm Values — ${params.SERVICE} [${env.toUpperCase()}]
+  return """# ================================================================
+# Helm Values -- ${params.SERVICE} [${env.toUpperCase()}]
 # Generated by Jenkins Service Generator
 # ================================================================
-"""
-  return header + result
+""" + result
 }
 
 def getEnvFullName(String env) {
@@ -548,71 +539,33 @@ def getEnvFullName(String env) {
   }
 }
 
-// ════════════════════════════════════════════════════════════
-//  JENKINSFILE GENERATOR
-//  readFile Jenkinsfile.template dari monorepo
-//  → inject block parameters, trigger, dan checkout branch
-//    sesuai environment:
-//
-//  dev / uat / stag:
-//    - Tidak ada parameters block
-//    - Auto trigger by SCM polling setiap push commit
-//    - Checkout branch: dev / uat / main (stag)
-//
-//  prod:
-//    - Ada parameters block (input manual GIT_BRANCH)
-//    - Tidak ada auto trigger (deploy manual)
-//    - Checkout branch: ${params.GIT_BRANCH}
-// ════════════════════════════════════════════════════════════
-
 def generateJenkinsfile(String registryCredId, String kubeConfigCredId) {
-  def env        = safe(params.ENV)
-  def service    = safe(params.SERVICE)
-  def serviceRepo = "git@github.com:alfirmS/${service}.git"
-
-  // ── Tentukan default branch per env ──────────────────────
+  def env           = safe(params.ENV)
+  def service       = safe(params.SERVICE)
+  def serviceRepo   = "git@github.com:alfirmS/${service}.git"
   def defaultBranch = (env in ['stag', 'prod']) ? 'main' : env
 
-  // ── PARAMETERS BLOCK ─────────────────────────────────────
-  // prod  → ada parameters (manual input branch/tag)
-  // lain  → tidak ada parameters block sama sekali
   def parametersBlock = ''
   if (env == 'prod') {
     parametersBlock = """  parameters {
     string(
       name: 'GIT_BRANCH',
       defaultValue: '${defaultBranch}',
-      description: 'Branch atau tag yang akan di-deploy ke PRODUCTION (e.g. main / v1.2.3)'
+      description: 'Branch atau tag yang akan di-deploy ke PRODUCTION'
     )
   }
 """
   }
 
-  // ══ TRIGGER BLOCK ═════════════════════════════════════════════════
-  // dev / uat / stag → GitHub webhook (auto deploy on push)
-  // prod             → tidak ada trigger (manual only)
-  //
-  // Syarat webhook aktif:
-  //   1. Plugin "GitHub" terinstall di Jenkins
-  //   2. Di repo GitHub → Settings → Webhooks → tambahkan:
-  //      Payload URL : http://<jenkins-url>/github-webhook/
-  //      Content type: application/json
-  //      Event       : Just the push event
   def triggerBlock = ''
   if (env != 'prod') {
     triggerBlock = """  triggers {
-    // Trigger otomatis saat ada push ke branch ${defaultBranch}
-    // Pastikan GitHub webhook sudah dikonfigurasi ke Jenkins
     githubPush()
   }
 """
   }
 
-  // ── CHECKOUT BRANCH ───────────────────────────────────────
-  // prod  → pakai ${params.GIT_BRANCH} (dari input manual)
-  // lain  → pakai branch tetap sesuai env
   def checkoutBranch = (env == 'prod') ? '${params.GIT_BRANCH}' : defaultBranch
-
   def template = readFile("${REPO_PATH}/templates/Jenkinsfile.template")
 
   return template
@@ -629,20 +582,6 @@ def generateJenkinsfile(String registryCredId, String kubeConfigCredId) {
     .replace('{{ TRIGGER_BLOCK }}',      triggerBlock)
     .replace('{{ CHECKOUT_BRANCH }}',    checkoutBranch)
 }
-
-// ════════════════════════════════════════════════════════════
-//  JOB XML GENERATOR
-//  Terima String template yang sudah dibaca dari:
-//    monorepo/templates/job-config.xml
-//  → replace {{ PLACEHOLDER }} dengan nilai dari Jenkins params
-//  → hasil rendered HANYA dipakai di workspace (tidak di-push)
-//
-//  Placeholder yang tersedia di job-config.xml:
-//    {{ SERVICE }}     → nama service
-//    {{ ENV }}         → target environment
-//    {{ GIT_CRED_ID }} → credential ID untuk Git
-//    {{ SCRIPT_PATH }} → path Jenkinsfile di dalam monorepo
-// ════════════════════════════════════════════════════════════
 
 def generateJobXml(String template) {
   return template
