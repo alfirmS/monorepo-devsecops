@@ -156,7 +156,7 @@ spec:
         // Checkout service repo ke subfolder service-src
         checkout([
           $class: 'GitSCM',
-          branches: [[name: "dev"]],
+          branches: [[name: "master"]],
           extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: 'service-src']],
           userRemoteConfigs: [[
             url: "${SERVICE_REPO}",
