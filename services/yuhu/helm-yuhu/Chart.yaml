@@ -1,0 +1,14 @@
+apiVersion: v2
+name: yuhu
+description: |
+  Helm chart untuk yuhu service.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+
+dependencies:
+  - name: common-library
+    version: "1.0.0"
+    repository: "oci://registry-1.docker.io/sfirman87"
+    # Untuk dev lokal:
+    # repository: "file://../commonLibrary"
