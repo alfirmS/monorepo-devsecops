@@ -64,7 +64,7 @@ pipeline {
   // ════════════════════════════════════════════════════════════
   agent {
     kubernetes {
-      cloud            'kubernetes'   // ganti ke 'k3d' jika nama cloud kamu k3d
+      cloud            'k3d'   // ganti ke 'k3d' jika nama cloud kamu k3d
       defaultContainer 'jnlp'        // checkout + script logic default di sini
       yaml """
 apiVersion: v1
