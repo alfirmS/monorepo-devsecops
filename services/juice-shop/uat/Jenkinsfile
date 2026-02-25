@@ -24,7 +24,7 @@ pipeline {
     // ── Credentials ──────────────────────────────────────────
     REGISTRY_HOST       	= '192.168.100.41:9443/lab'
     REGISTRY_CRED_ID    	= 'harbor-credential-id'
-    KUBECONFIG_CRED_ID  	= 'kubeconfig-uat'
+    KUBECONFIG_CRED_ID  	= 'kubeconfig-credential-id'
     HELM_OCI_CRED_ID  	= 'dockerhub-credential-id'
     GIT_CRED_ID         	= 'git-credential-id'
   }
@@ -192,6 +192,7 @@ spec:
               --context=dir://\${WORKSPACE}/service-src \
               --dockerfile=\${WORKSPACE}/service-src/Dockerfile \
               --destination=${REGISTRY_HOST}/${SERVICE}:${IMAGE_TAG} \
+              --skip-tls-verify \
               --cache=true \
               --cache-ttl=24h \
               --compressed-caching=false \
