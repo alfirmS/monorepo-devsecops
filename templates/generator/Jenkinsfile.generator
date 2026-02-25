@@ -31,6 +31,8 @@ pipeline {
 
     choice(name: 'REGISTRY_TYPE', choices: ['Harbor', 'Huawei SWR', 'Docker Hub'], description: 'Container registry yang dipakai')
     string(name: 'REGISTRY_HOST', defaultValue: '', description: 'Registry host URL (e.g. harbor.example.com)')
+    string(name: 'REGISTRY_SECRET', defaultValue: 'regcred',
+      description: 'Nama Kubernetes secret type docker-registry di namespace jenkins. Cek: kubectl get secret -n jenkins. Dipakai kaniko untuk push image dan pod untuk pull image.')
 
     choice(name: 'GIT_CRED_ID', choices: ['git-credential-id', 'github-ssh-key', 'bitbucket-scm-deployer'],
       description: 'Jenkins credential ID untuk akses Git (sshUserPrivateKey)')
@@ -86,7 +88,7 @@ pipeline {
   // ════════════════════════════════════════════════════════════
   agent {
     kubernetes {
-      cloud            'k3d'   // ganti ke 'k3d' jika nama cloud kamu k3d
+      cloud            'kubernetes'   // ganti ke 'k3d' jika nama cloud kamu k3d
       defaultContainer 'jnlp'        // sh() tanpa container() wrapper → jalan di jnlp
       yaml """
 apiVersion: v1
@@ -194,12 +196,19 @@ spec:
       steps {
         script {
           def service     = params.SERVICE
-          def serviceDir  = "${REPO_PATH}/services/${service}"
-          def helmDestDir = "${serviceDir}/helm-${service}"
+          def env         = params.ENV
+          // ── PATH PER ENV ─────────────────────────────────────────────
+          // services/<service>/<env>/helm-<service>/
+          // Setiap environment punya direktori sendiri → tidak saling tertimpa
+          // Contoh:
+          //   services/payment-api/dev/helm-payment-api/values.yaml
+          //   services/payment-api/prod/helm-payment-api/values.yaml
+          def serviceEnvDir = "${REPO_PATH}/services/${service}/${env}"
+          def helmDestDir   = "${serviceEnvDir}/helm-${service}"
 
           container('tools') {
             sh """
-              mkdir -p ${serviceDir}
+              mkdir -p ${serviceEnvDir}
               rm -rf ${helmDestDir}
               mkdir -p ${helmDestDir}
               cp -r helm-starter-tmp/starter-helm/. ${helmDestDir}/
@@ -211,7 +220,7 @@ spec:
           writeFile file: "${helmDestDir}/Chart.yaml", text: chartYaml
             .replace('{{ SERVICE }}', service)
 
-          echo "✅ helm-${service}/ siap di services/${service}/"
+          echo "✅ helm-${service}/ siap di services/${service}/${env}/"
         }
       }
     }
@@ -223,20 +232,21 @@ spec:
       steps {
         script {
           def service          = params.SERVICE
-          def serviceDir       = "${REPO_PATH}/services/${service}"
-          def helmDestDir      = "${serviceDir}/helm-${service}"
+          def env              = params.ENV
+          def serviceEnvDir    = "${REPO_PATH}/services/${service}/${env}"
+          def helmDestDir      = "${serviceEnvDir}/helm-${service}"
           def resources        = resolveResources()
           def registryCredId   = getRegistryCredentialId()
           def kubeConfigCredId = getKubeConfigCredentialId()
-          def env              = params.ENV
 
           def defaultValues = readFile("${helmDestDir}/values.yaml")
           def patchedValues = patchHelmValues(defaultValues, env, resources)
           writeFile file: "${helmDestDir}/values.yaml", text: patchedValues
           echo "✅ values.yaml di-patch"
 
+          // Jenkinsfile disimpan di dalam folder env, bukan di root service
           def jenkinsfileContent = generateJenkinsfile(registryCredId, kubeConfigCredId)
-          writeFile file: "${serviceDir}/Jenkinsfile", text: jenkinsfileContent
+          writeFile file: "${serviceEnvDir}/Jenkinsfile", text: jenkinsfileContent
           echo "✅ Jenkinsfile di-generate"
         }
       }
@@ -255,15 +265,14 @@ spec:
                   chmod 600 /root/.ssh/id_rsa
                   git config user.email "jenkins@company.com"
                   git config user.name "Jenkins Service Generator"
-                  git add services/${params.SERVICE}/
+                  git add services/${params.SERVICE}/${params.ENV}/
                   if git diff --staged --quiet; then
                     echo "⚠️  Tidak ada perubahan, skip commit"
                   else
                     git commit -m "feat: init service ${params.SERVICE} [${params.ENV}]
 
-- helm-${params.SERVICE}/ (copied from starter-helm)
-- helm-${params.SERVICE}/values.yaml (patched untuk ${params.ENV})
-- Jenkinsfile
+Path  : services/${params.SERVICE}/${params.ENV}/
+Files : Jenkinsfile, helm-${params.SERVICE}/values.yaml
 - HPA: ${params.HPA_ENABLED}
 - PDB: ${params.PDB_ENABLED}
 - ExternalSecret: ${params.EXTERNAL_SECRET_ENABLED}"
@@ -439,11 +448,12 @@ spec:
              tools (alpine/git)
 
  Files:
-   services/${params.SERVICE}/
-   Jenkinsfile
-   helm-${params.SERVICE}/Chart.yaml
-   helm-${params.SERVICE}/values.yaml (patched)
-   helm-${params.SERVICE}/templates/
+   services/${params.SERVICE}/${params.ENV}/
+   ├── Jenkinsfile
+   └── helm-${params.SERVICE}/
+       ├── Chart.yaml
+       ├── values.yaml  (patched)
+       └── templates/
 
  Job: ${JENKINS_URL}${folderSegment}job/${params.SERVICE}
         """
@@ -581,6 +591,7 @@ def generateJenkinsfile(String registryCredId, String kubeConfigCredId) {
     .replace('{{ PARAMETERS_BLOCK }}',   parametersBlock)
     .replace('{{ TRIGGER_BLOCK }}',      triggerBlock)
     .replace('{{ CHECKOUT_BRANCH }}',    checkoutBranch)
+    .replace('{{ REGISTRY_SECRET }}',    safe(params.REGISTRY_SECRET))
 }
 
 def generateJobXml(String template) {
@@ -588,5 +599,5 @@ def generateJobXml(String template) {
     .replace('{{ SERVICE }}',     safe(params.SERVICE))
     .replace('{{ ENV }}',         safe(params.ENV))
     .replace('{{ GIT_CRED_ID }}', safe(params.GIT_CRED_ID))
-    .replace('{{ SCRIPT_PATH }}', "services/${params.SERVICE}/Jenkinsfile")
+    .replace('{{ SCRIPT_PATH }}', "services/${params.SERVICE}/${params.ENV}/Jenkinsfile")
 }
