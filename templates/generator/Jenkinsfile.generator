@@ -88,7 +88,7 @@ pipeline {
   // ════════════════════════════════════════════════════════════
   agent {
     kubernetes {
-      cloud            'kubernetes'   // ganti ke 'k3d' jika nama cloud kamu k3d
+      cloud            'k3d'   // ganti ke 'k3d' jika nama cloud kamu k3d
       defaultContainer 'jnlp'        // sh() tanpa container() wrapper → jalan di jnlp
       yaml """
 apiVersion: v1
