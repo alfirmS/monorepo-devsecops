@@ -34,6 +34,15 @@ pipeline {
     string(name: 'REGISTRY_SECRET', defaultValue: 'regcred',
       description: 'Nama Kubernetes secret type docker-registry di namespace jenkins. Cek: kubectl get secret -n jenkins. Dipakai kaniko untuk push image dan pod untuk pull image.')
 
+    // ── Helm OCI Registry (untuk helm dep update / helm registry login) ──
+    // Bisa sama dengan image registry atau berbeda.
+    // Contoh: image di Harbor, helm chart dependency di Docker Hub OCI
+    choice(name: 'HELM_OCI_REGISTRY_TYPE',
+      choices: ['Docker Hub', 'Harbor', 'Huawei SWR', 'Same as Image Registry'],
+      description: '''Registry OCI untuk helm chart dependency (helm registry login).
+  Same as Image Registry = pakai credential yang sama dengan REGISTRY_TYPE'''
+    )
+
     choice(name: 'GIT_CRED_ID', choices: ['git-credential-id', 'github-ssh-key', 'bitbucket-scm-deployer'],
       description: 'Jenkins credential ID untuk akses Git (sshUserPrivateKey)')
 
@@ -88,7 +97,7 @@ pipeline {
   // ════════════════════════════════════════════════════════════
   agent {
     kubernetes {
-      cloud            'k3d'   // ganti ke 'k3d' jika nama cloud kamu k3d
+      cloud            'kubernetes'   // ganti ke 'k3d' jika nama cloud kamu k3d
       defaultContainer 'jnlp'        // sh() tanpa container() wrapper → jalan di jnlp
       yaml """
 apiVersion: v1
@@ -237,6 +246,7 @@ spec:
           def helmDestDir      = "${serviceEnvDir}/helm-${service}"
           def resources        = resolveResources()
           def registryCredId   = getRegistryCredentialId()
+          def helmOciCredId    = getHelmOciCredentialId()
           def kubeConfigCredId = getKubeConfigCredentialId()
 
           def defaultValues = readFile("${helmDestDir}/values.yaml")
@@ -245,7 +255,7 @@ spec:
           echo "✅ values.yaml di-patch"
 
           // Jenkinsfile disimpan di dalam folder env, bukan di root service
-          def jenkinsfileContent = generateJenkinsfile(registryCredId, kubeConfigCredId)
+          def jenkinsfileContent = generateJenkinsfile(registryCredId, kubeConfigCredId, helmOciCredId)
           writeFile file: "${serviceEnvDir}/Jenkinsfile", text: jenkinsfileContent
           echo "✅ Jenkinsfile di-generate"
         }
@@ -512,6 +522,19 @@ def getKubeConfigCredentialId() {
   }
 }
 
+def getHelmOciCredentialId() {
+  // 'Same as Image Registry' → pakai credential yang sama dengan image registry
+  if (params.HELM_OCI_REGISTRY_TYPE == 'Same as Image Registry') {
+    return getRegistryCredentialId()
+  }
+  switch(params.HELM_OCI_REGISTRY_TYPE) {
+    case 'Harbor':      return 'harbor-credential-id'
+    case 'Huawei SWR':  return 'huawei-credential-id'
+    case 'Docker Hub':  return 'dockerhub-credential-id'
+    default:            return 'dockerhub-credential-id'
+  }
+}
+
 def patchHelmValues(String template, String env, Map resources) {
   def result = template
     .replace('{{ GLOBAL_ENV }}',              getEnvFullName(env))
@@ -549,7 +572,7 @@ def getEnvFullName(String env) {
   }
 }
 
-def generateJenkinsfile(String registryCredId, String kubeConfigCredId) {
+def generateJenkinsfile(String registryCredId, String kubeConfigCredId, String helmOciCredId) {
   def env           = safe(params.ENV)
   def service       = safe(params.SERVICE)
   def serviceRepo   = "git@github.com:alfirmS/${service}.git"
@@ -591,6 +614,7 @@ def generateJenkinsfile(String registryCredId, String kubeConfigCredId) {
     .replace('{{ PARAMETERS_BLOCK }}',   parametersBlock)
     .replace('{{ TRIGGER_BLOCK }}',      triggerBlock)
     .replace('{{ CHECKOUT_BRANCH }}',    checkoutBranch)
+    .replace('{{ HELM_OCI_CRED_ID }}',   helmOciCredId)
     .replace('{{ REGISTRY_SECRET }}',    safe(params.REGISTRY_SECRET))
 }
 

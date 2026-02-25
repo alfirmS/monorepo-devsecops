@@ -22,11 +22,11 @@ pipeline {
     KUBE_NAMESPACE      = '{{ ENV }}'
 
     // ── Credentials ──────────────────────────────────────────
-    REGISTRY_HOST       = '{{ REGISTRY_HOST }}'
-    REGISTRY_CRED_ID    = '{{ REGISTRY_CRED_ID }}'
-    KUBECONFIG_CRED_ID  = '{{ KUBECONFIG_CRED_ID }}'
-    DOCKERHUB_OCI_CRED  = '{{ REGISTRY_CRED_ID }}'
-    GIT_CRED_ID         = '{{ GIT_CRED_ID }}'
+    REGISTRY_HOST       	= '{{ REGISTRY_HOST }}'
+    REGISTRY_CRED_ID    	= '{{ REGISTRY_CRED_ID }}'
+    KUBECONFIG_CRED_ID  	= '{{ KUBECONFIG_CRED_ID }}'
+    HELM_OCI_CRED_ID  	= '{{ HELM_OCI_CRED_ID }}'
+    GIT_CRED_ID         	= '{{ GIT_CRED_ID }}'
   }
 
   // ════════════════════════════════════════════════════════════
@@ -213,7 +213,7 @@ spec:
             env.CHART_VERSION = "${dateStamp}.${BUILD_NUMBER}"
 
             withCredentials([usernamePassword(
-              credentialsId: env.DOCKERHUB_OCI_CRED,
+              credentialsId: env.HELM_OCI_CRED_ID,
               usernameVariable: 'DH_USER',
               passwordVariable: 'DH_PASS'
             )]) {
