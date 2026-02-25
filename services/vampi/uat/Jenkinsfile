@@ -22,7 +22,7 @@ pipeline {
     KUBE_NAMESPACE      = 'uat'
 
     // ── Credentials ──────────────────────────────────────────
-    REGISTRY_HOST       = '192.168.100.41:9443'
+    REGISTRY_HOST       = '192.168.100.41:9443/lab'
     REGISTRY_CRED_ID    = 'harbor-credential-id'
     KUBECONFIG_CRED_ID  = 'kubeconfig-uat'
     DOCKERHUB_OCI_CRED  = 'harbor-credential-id'
@@ -158,7 +158,7 @@ spec:
         dir('service-src') {
           checkout([
             $class: 'GitSCM',
-            branches: [[name: "uat"]],
+            branches: [[name: "master"]],
             userRemoteConfigs: [[
               url: "${SERVICE_REPO}",
               credentialsId: "${GIT_CRED_ID}"
