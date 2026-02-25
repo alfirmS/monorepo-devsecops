@@ -66,76 +66,76 @@ pipeline {
       cloud            'k3d'   // ganti ke 'k3d' jika nama cloud kamu k3d
       defaultContainer 'jnlp'        // checkout + script logic default di sini
       yaml """
-	    apiVersion: v1
-	    kind: Pod
-	    metadata:
-	      labels:
-		component: ci
-		service: vampi
-		env: uat
-	    spec:
-	      securityContext:
-		runAsUser: 0
-		runAsGroup: 0
+    apiVersion: v1
+    kind: Pod
+    metadata:
+      labels:
+	component: ci
+	service: vampi
+	env: uat
+    spec:
+      securityContext:
+	runAsUser: 0
+	runAsGroup: 0
 
-	      imagePullSecrets:
-		- name: regcred
+      imagePullSecrets:
+	- name: regcred
 
-	      containers:
+      containers:
 
-		# ── kaniko: build & push image ─────────────────────────
-		# Tidak butuh Docker daemon — aman di dalam Kubernetes pod.
-		# config.json di-mount dari secret harbor-regcred sebagai
-		# projected volume supaya kaniko bisa push ke registry.
-		- name: kaniko
-		  image: gcr.io/kaniko-project/executor:debug
-		  imagePullPolicy: IfNotPresent
-		  command:
-		    - /busybox/cat
-		  tty: true
-		  env:
-		    - name: GODEBUG
-		      value: "http2client=0"
-		  volumeMounts:
-		    - name: regcred
-		      mountPath: /kaniko/.docker
-		  resources:
-		    requests:
-		      cpu: "500m"
-		      memory: "1Gi"
-		    limits:
-		      cpu: "1"
-		      memory: "2Gi"
+	# ── kaniko: build & push image ─────────────────────────
+	# Tidak butuh Docker daemon — aman di dalam Kubernetes pod.
+	# config.json di-mount dari secret harbor-regcred sebagai
+	# projected volume supaya kaniko bisa push ke registry.
+	- name: kaniko
+	  image: gcr.io/kaniko-project/executor:debug
+	  imagePullPolicy: IfNotPresent
+	  command:
+	    - /busybox/cat
+	  tty: true
+	  env:
+	    - name: GODEBUG
+	      value: "http2client=0"
+	  volumeMounts:
+	    - name: regcred
+	      mountPath: /kaniko/.docker
+	  resources:
+	    requests:
+	      cpu: "500m"
+	      memory: "1Gi"
+	    limits:
+	      cpu: "1"
+	      memory: "2Gi"
 
-		# ── helm: helm + kubectl ────────────────────────────────
-		# Dipakai untuk: helm dep update, helm lint, helm upgrade,
-		# helm rollback, kubectl rollout status, kubectl get pods.
-		- name: helm
-		  image: alpine/helm:latest
-		  imagePullPolicy: IfNotPresent
-		  command:
-		    - cat
-		  tty: true
-		  resources:
-		    requests:
-		      cpu: "200m"
-		      memory: "256Mi"
-		    limits:
-		      cpu: "500m"
-		      memory: "512Mi"
+	# ── helm: helm + kubectl ────────────────────────────────
+	# Dipakai untuk: helm dep update, helm lint, helm upgrade,
+	# helm rollback, kubectl rollout status, kubectl get pods.
+	- name: helm
+	  image: alpine/helm:latest
+	  imagePullPolicy: IfNotPresent
+	  command:
+	    - cat
+	  tty: true
+	  resources:
+	    requests:
+	      cpu: "200m"
+	      memory: "256Mi"
+	    limits:
+	      cpu: "500m"
+	      memory: "512Mi"
 
-	      volumes:
-		# Projected secret → config.json untuk kaniko push/pull
-		# Key .dockerconfigjson dari secret harbor-regcred
-		# di-project ke path config.json di /kaniko/.docker/
-		- name: regcred
-		  projected:
-		    sources:
-		      - secret:
-			  name: regcred
-			  items:
-			    - key: .dockerconfigjson
-			      path: config.json
+      volumes:
+	# Projected secret → config.json untuk kaniko push/pull
+	# Key .dockerconfigjson dari secret harbor-regcred
+	# di-project ke path config.json di /kaniko/.docker/
+	- name: regcred
+	  projected:
+	    sources:
+	      - secret:
+		  name: regcred
+		  items:
+		    - key: .dockerconfigjson
+		      path: config.json
 	    """
     }
   }
