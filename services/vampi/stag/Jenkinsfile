@@ -91,7 +91,7 @@ spec:
         dir('service-src') {
           checkout([
             $class: 'GitSCM',
-            branches: [[name: "main"]],
+            branches: [[name: "stag"]],
             userRemoteConfigs: [[
               url: "${SERVICE_REPO}",
               credentialsId: "${GIT_CRED_ID}"
