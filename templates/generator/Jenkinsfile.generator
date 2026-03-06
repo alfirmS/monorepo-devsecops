@@ -25,12 +25,12 @@ pipeline {
     booleanParam(name: 'EXTERNAL_SECRET_ENABLED', defaultValue: false, description: 'Enable ExternalSecret (Vault integration)')
 
     choice(name: 'REGISTRY_TYPE',   choices: ['Harbor', 'Huawei SWR', 'Docker Hub'], description: 'Container registry')
-    string(name: 'REGISTRY_HOST',   defaultValue: '', description: 'Registry host URL (e.g. harbor.example.com)')
+    string(name: 'REGISTRY_HOST',   defaultValue: 'index.docker.io', description: 'Registry host URL (e.g. harbor.example.com)')
     string(name: 'REGISTRY_SECRET', defaultValue: 'regcred', description: 'Kubernetes secret docker-registry di namespace jenkins')
 
     booleanParam(name: 'GENERATE_DOCKERFILE', defaultValue: true, description: 'Generate Dockerfile ke services/<service>/<env>/Dockerfile')
     choice(name: 'DOCKERFILE_RUNTIME_TYPE',
-      choices: ['node-npm', 'node-yarn', 'vuejs', 'python-pip', 'java-jar', 'golang', 'static-nginx', 'custom-cmd'],
+      choices: ['nodejs', 'vuejs', 'python', 'golang'],
       description: 'node-npm | node-yarn | vuejs | python-pip | java-jar | golang | static-nginx | custom-cmd')
     string(name: 'VAULT_ADDR',        defaultValue: '', description: '[vuejs] URL Vault, e.g. https://vault.example.com')
     string(name: 'VAULT_SECRET_PATH', defaultValue: '', description: '[vuejs] Path secret di Vault, e.g. secret/data/myapp/uat')
