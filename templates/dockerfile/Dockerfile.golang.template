@@ -1,0 +1,30 @@
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+ARG VAULT_TOKEN
+RUN apk add --no-cache curl jq && \
+    curl -sf \
+         -H "X-Vault-Token: ${VAULT_TOKEN}" \
+         {{ VAULT_ADDR }}/v1/{{ VAULT_SECRET_PATH }} \
+      | jq -r '.data.data | to_entries[] | "\(.key)=\(.value)"' > .env && \
+    npm run build && \
+    apk del curl jq
+
+FROM node:20-alpine AS runtime
+ENV NODE_ENV=production \
+    NPM_CONFIG_UPDATE_NOTIFIER=false \
+    NPM_CONFIG_FUND=false
+WORKDIR /app
+RUN addgroup -g 10001 -S appgroup && \
+    adduser  -u 10001 -S appuser -G appgroup --no-create-home
+COPY --from=builder --chown=appuser:appgroup /app/node_modules ./node_modules
+COPY --from=builder --chown=appuser:appgroup /app/package.json ./
+COPY --from=builder --chown=appuser:appgroup /app/.output      ./.output
+COPY --from=builder --chown=appuser:appgroup /app/.env         ./.env
+USER appuser
+EXPOSE {{ APP_PORT }}
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD wget -qO- http://localhost:{{ APP_PORT }}/ || exit 1
+CMD ["npm", "run", "start"]

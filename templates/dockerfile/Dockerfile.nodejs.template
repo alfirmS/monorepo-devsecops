@@ -1,0 +1,22 @@
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --omit=dev
+COPY . .
+RUN npm run build --if-present
+
+FROM node:20-alpine AS runtime
+ENV NODE_ENV=production \
+    NPM_CONFIG_UPDATE_NOTIFIER=false \
+    NPM_CONFIG_FUND=false
+WORKDIR /app
+RUN addgroup -g 10001 -S appgroup && \
+    adduser  -u 10001 -S appuser -G appgroup --no-create-home
+COPY --from=builder --chown=appuser:appgroup /app/dist        ./dist
+COPY --from=builder --chown=appuser:appgroup /app/node_modules ./node_modules
+COPY --from=builder --chown=appuser:appgroup /app/package.json ./
+USER appuser
+EXPOSE {{ APP_PORT }}
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD wget -qO- http://localhost:{{ APP_PORT }}/health || exit 1
+CMD ["node", "server.js"]

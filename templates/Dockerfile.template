@@ -1,0 +1,80 @@
+# ==============================================================================
+# Dockerfile — {{ SERVICE }} [{{ ENV_UPPER }}]
+# Runtime     : {{ RUNTIME_TYPE }}
+# Generated   : Jenkins Service Generator
+#
+# OWASP Container Security Standards Applied:
+#   [OWASP-DS-01] Multi-stage build — secrets & build tools tidak masuk image final
+#   [OWASP-DS-02] Non-root user — runtime berjalan sebagai user terbatas (UID 10001)
+#   [OWASP-DS-03] Minimal base image — runtime image sekecil mungkin (distroless/alpine)
+#   [OWASP-DS-04] No ADD from URL — semua dependency lewat package manager resmi
+#   [OWASP-DS-05] Read-only hints — ENV NODE_ENV / PYTHONDONTWRITEBYTECODE / dsb
+#   [OWASP-DS-06] HEALTHCHECK — liveness probe dari dalam container
+#   [OWASP-DS-07] COPY --chown — file dimiliki oleh appuser, bukan root
+#   [OWASP-DS-08] Pinned base image tag — tidak pakai :latest di production
+#   [OWASP-DS-09] No secrets di ENV / ARG — semua secret masuk via Kubernetes Secret
+#   [OWASP-DS-10] Minimal capabilities — tidak install sudo / curl / wget di runtime
+# ==============================================================================
+
+# ── Stage 1: deps ─────────────────────────────────────────────────────────────
+# Tujuan : install & cache dependency saja, TANPA source code
+# Hasil  : layer dependency yang stabil → cache-hit saat source berubah
+# OWASP  : [DS-01] dependency resolver tidak masuk runtime image
+# ──────────────────────────────────────────────────────────────────────────────
+FROM {{ BUILDER_IMAGE }} AS deps
+WORKDIR {{ WORKDIR }}
+
+{{ DEPS_COPY }}
+{{ DEPS_INSTALL }}
+
+# ── Stage 2: builder ──────────────────────────────────────────────────────────
+# Tujuan : compile / build artifact dari source code
+# Hasil  : artifact siap pakai (dist/, *.jar, binary, dsb)
+# OWASP  : [DS-01] compiler, dev-tools, intermediate files tidak masuk runtime
+# ──────────────────────────────────────────────────────────────────────────────
+FROM {{ BUILDER_IMAGE }} AS builder
+WORKDIR {{ WORKDIR }}
+
+# Salin dependency yang sudah terinstall dari stage deps
+{{ DEPS_COPY_FROM }}
+
+# Salin seluruh source code
+COPY . .
+
+# Build artifact
+{{ BUILD_CMD }}
+
+# ── Stage 3: runtime ──────────────────────────────────────────────────────────
+# Tujuan : image final sekecil dan seaman mungkin
+# OWASP  : [DS-02] non-root, [DS-03] minimal image, [DS-07] --chown,
+#          [DS-05] read-only env hints, [DS-06] healthcheck, [DS-08] pinned tag
+# ──────────────────────────────────────────────────────────────────────────────
+FROM {{ RUNTIME_IMAGE }} AS runtime
+
+# [OWASP-DS-05] Hardening env — matikan fitur yang bisa tulis ke disk/expose info
+{{ RUNTIME_ENV }}
+
+WORKDIR {{ WORKDIR }}
+
+# [OWASP-DS-02] Buat user non-root khusus aplikasi
+# UID/GID 10001 dipilih agar tidak konflik dengan system user standar (< 1000)
+# alpine/debian: addgroup + adduser, distroless: user "nonroot" sudah tersedia
+{{ CREATE_USER }}
+
+# [OWASP-DS-07] Salin artifact dari builder dengan ownership langsung ke appuser
+# TIDAK copy seluruh source — hanya artifact yang dibutuhkan runtime
+{{ RUNTIME_COPY }}
+
+# [OWASP-DS-02] Switch ke user non-root sebelum EXPOSE dan CMD
+{{ USE_USER }}
+
+# Expose port aplikasi
+EXPOSE {{ APP_PORT }}
+
+# [OWASP-DS-06] HEALTHCHECK — deteksi container tidak sehat dari dalam
+# Interval 30s, timeout 5s, 3x gagal = unhealthy
+# Override di Kubernetes via livenessProbe / readinessProbe jika perlu
+{{ HEALTHCHECK }}
+
+# Entrypoint aplikasi
+{{ ENTRYPOINT_CMD }}

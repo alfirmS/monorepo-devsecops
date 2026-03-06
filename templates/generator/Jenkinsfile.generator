@@ -1,52 +1,49 @@
-// ============================================================
-//  JOB GENERATOR PIPELINE — Kubernetes agent (jnlp auto-inject)
-//  Jenkins 2.541.1 | Kubernetes plugin
-// ============================================================
-
 pipeline {
 
   parameters {
-    string(name: 'SERVICE',         defaultValue: '', description: 'Service name, lowercase alphanumeric & hyphens only (e.g. payment-api)')
-    choice(name: 'ENV',             choices: ['dev', 'uat', 'stag', 'prod'], description: 'Target environment')
-    string(name: 'CONTAINER_PORT',  defaultValue: '8080', description: 'Port yang di-expose container')
-    choice(name: 'K8S_SERVICE_TYPE',choices: ['ClusterIP', 'LoadBalancer', 'NodePort'], description: 'Kubernetes Service type')
+    string(name: 'SERVICE',        defaultValue: '', description: 'Service name, lowercase alphanumeric & hyphens (e.g. payment-api)')
+    choice(name: 'ENV',            choices: ['dev', 'uat', 'stag', 'prod'], description: 'Target environment')
+    string(name: 'CONTAINER_PORT', defaultValue: '8080', description: 'Port yang di-expose container')
+    choice(name: 'K8S_SERVICE_TYPE', choices: ['ClusterIP', 'LoadBalancer', 'NodePort'], description: 'Kubernetes Service type')
 
     choice(name: 'RESOURCE_PRESET', choices: ['small', 'medium', 'large', 'xlarge', 'custom'],
       description: 'small=500m/512Mi | medium=1/1Gi | large=2/2Gi | xlarge=4/4Gi | custom=manual')
-    string(name: 'CUSTOM_CPU_LIMIT',    defaultValue: '500m',  description: '[Custom] CPU limit')
-    string(name: 'CUSTOM_CPU_REQUEST',  defaultValue: '250m',  description: '[Custom] CPU request')
-    string(name: 'CUSTOM_MEM_LIMIT',    defaultValue: '512Mi', description: '[Custom] Memory limit')
-    string(name: 'CUSTOM_MEM_REQUEST',  defaultValue: '256Mi', description: '[Custom] Memory request')
+    string(name: 'CUSTOM_CPU_LIMIT',   defaultValue: '500m',  description: '[custom] CPU limit')
+    string(name: 'CUSTOM_CPU_REQUEST', defaultValue: '250m',  description: '[custom] CPU request')
+    string(name: 'CUSTOM_MEM_LIMIT',   defaultValue: '512Mi', description: '[custom] Memory limit')
+    string(name: 'CUSTOM_MEM_REQUEST', defaultValue: '256Mi', description: '[custom] Memory request')
 
-    booleanParam(name: 'HPA_ENABLED',             defaultValue: false, description: 'Enable HorizontalPodAutoscaler')
-    string(name: 'HPA_MIN_REPLICAS',  defaultValue: '1',  description: 'HPA min replicas')
-    string(name: 'HPA_MAX_REPLICAS',  defaultValue: '10', description: 'HPA max replicas')
-    string(name: 'HPA_CPU_TARGET',    defaultValue: '70', description: 'HPA target CPU utilization (%)')
-    string(name: 'HPA_MEM_TARGET',    defaultValue: '80', description: 'HPA target Memory utilization (%)')
+    booleanParam(name: 'HPA_ENABLED',    defaultValue: false, description: 'Enable HorizontalPodAutoscaler')
+    string(name: 'HPA_MIN_REPLICAS',     defaultValue: '1',   description: 'HPA min replicas')
+    string(name: 'HPA_MAX_REPLICAS',     defaultValue: '10',  description: 'HPA max replicas')
+    string(name: 'HPA_CPU_TARGET',       defaultValue: '70',  description: 'HPA target CPU utilization (%)')
+    string(name: 'HPA_MEM_TARGET',       defaultValue: '80',  description: 'HPA target Memory utilization (%)')
 
-    booleanParam(name: 'PDB_ENABLED',             defaultValue: false, description: 'Enable PodDisruptionBudget')
-    string(name: 'PDB_MIN_AVAILABLE', defaultValue: '1',  description: 'PDB minAvailable (angka atau %, e.g. "1" atau "50%")')
+    booleanParam(name: 'PDB_ENABLED',    defaultValue: false, description: 'Enable PodDisruptionBudget')
+    string(name: 'PDB_MIN_AVAILABLE',    defaultValue: '1',   description: 'PDB minAvailable (e.g. "1" atau "50%")')
 
-    booleanParam(name: 'EXTERNAL_SECRET_ENABLED',  defaultValue: false, description: 'Enable ExternalSecret (Vault integration)')
+    booleanParam(name: 'EXTERNAL_SECRET_ENABLED', defaultValue: false, description: 'Enable ExternalSecret (Vault integration)')
 
-    choice(name: 'REGISTRY_TYPE', choices: ['Harbor', 'Huawei SWR', 'Docker Hub'], description: 'Container registry yang dipakai')
-    string(name: 'REGISTRY_HOST', defaultValue: '', description: 'Registry host URL (e.g. harbor.example.com)')
-    string(name: 'REGISTRY_SECRET', defaultValue: 'regcred',
-      description: 'Nama Kubernetes secret type docker-registry di namespace jenkins. Cek: kubectl get secret -n jenkins. Dipakai kaniko untuk push image dan pod untuk pull image.')
+    choice(name: 'REGISTRY_TYPE',   choices: ['Harbor', 'Huawei SWR', 'Docker Hub'], description: 'Container registry')
+    string(name: 'REGISTRY_HOST',   defaultValue: '', description: 'Registry host URL (e.g. harbor.example.com)')
+    string(name: 'REGISTRY_SECRET', defaultValue: 'regcred', description: 'Kubernetes secret docker-registry di namespace jenkins')
 
-    // ── Helm OCI Registry (untuk helm dep update / helm registry login) ──
-    // Bisa sama dengan image registry atau berbeda.
-    // Contoh: image di Harbor, helm chart dependency di Docker Hub OCI
+    booleanParam(name: 'GENERATE_DOCKERFILE', defaultValue: true, description: 'Generate Dockerfile ke services/<service>/<env>/Dockerfile')
+    choice(name: 'DOCKERFILE_RUNTIME_TYPE',
+      choices: ['node-npm', 'node-yarn', 'vuejs', 'python-pip', 'java-jar', 'golang', 'static-nginx', 'custom-cmd'],
+      description: 'node-npm | node-yarn | vuejs | python-pip | java-jar | golang | static-nginx | custom-cmd')
+    string(name: 'VAULT_ADDR',        defaultValue: '', description: '[vuejs] URL Vault, e.g. https://vault.example.com')
+    string(name: 'VAULT_SECRET_PATH', defaultValue: '', description: '[vuejs] Path secret di Vault, e.g. secret/data/myapp/uat')
+    string(name: 'VAULT_CRED_ID',     defaultValue: 'vault-token', description: '[vuejs] Jenkins credential ID (Secret Text)')
+
     choice(name: 'HELM_OCI_REGISTRY_TYPE',
       choices: ['Docker Hub', 'Harbor', 'Huawei SWR', 'Same as Image Registry'],
-      description: '''Registry OCI untuk helm chart dependency (helm registry login).
-  Same as Image Registry = pakai credential yang sama dengan REGISTRY_TYPE'''
-    )
+      description: 'Registry OCI untuk helm chart dependency')
 
     choice(name: 'GIT_CRED_ID', choices: ['git-credential-id', 'github-ssh-key', 'bitbucket-scm-deployer'],
       description: 'Jenkins credential ID untuk akses Git (sshUserPrivateKey)')
 
-    string(name: 'JENKINS_FOLDER', defaultValue: '', description: 'Folder Jenkins tempat job dibuat (kosong = root). Contoh: backend/java')
+    string(name: 'JENKINS_FOLDER', defaultValue: '', description: 'Folder Jenkins tempat job dibuat (kosong = root). e.g. backend/java')
   }
 
   environment {
@@ -56,49 +53,10 @@ pipeline {
     HELM_STARTER_BRANCH = 'helm-starter'
   }
 
-  // ════════════════════════════════════════════════════════════
-  //  KUBERNETES AGENT
-  //
-  //  Mengikuti pattern yang sama dengan pipeline production:
-  //
-  //    agent {
-  //      kubernetes {
-  //        defaultContainer 'jnlp'    ← sh() default di jnlp
-  //        yaml """
-  //          containers:
-  //          - name: maven            ← helper, command: [cat]
-  //          - name: helm             ← helper, command: [cat]
-  //          # jnlp TIDAK ditulis → auto-inject oleh plugin
-  //        """
-  //      }
-  //    }
-  //
-  //  Pod layout pipeline ini:
-  //  ┌─────────────────────────────────────────────────────┐
-  //  │  jnlp   ← TIDAK ditulis, auto-inject plugin        │
-  //  │          ← defaultContainer                         │
-  //  │          ← readFile/writeFile/script jalan di sini  │
-  //  │                                                     │
-  //  │  tools  ← helper container                          │
-  //  │          ← image: alpine/git (git + ssh bawaan)    │
-  //  │          ← command: [cat] + tty: true               │
-  //  │          ← dipanggil: container('tools') { sh '' } │
-  //  │          ← dipakai untuk: git clone, git push, curl │
-  //  └─────────────────────────────────────────────────────┘
-  //
-  //  imagePullSecrets:
-  //    Jika tools image ada di private registry, uncomment
-  //    imagePullSecrets dan buat secret di namespace jenkins:
-  //      kubectl create secret docker-registry harbor-regcred \
-  //        --docker-server=harbor.example.com \
-  //        --docker-username=robot$jenkins \
-  //        --docker-password=<token> \
-  //        --namespace=jenkins
-  // ════════════════════════════════════════════════════════════
   agent {
     kubernetes {
-      cloud            'kubernetes'   // ganti ke 'k3d' jika nama cloud kamu k3d
-      defaultContainer 'jnlp'        // sh() tanpa container() wrapper → jalan di jnlp
+      cloud            'kubernetes'
+      defaultContainer 'jnlp'
       yaml """
 apiVersion: v1
 kind: Pod
@@ -110,19 +68,13 @@ spec:
   securityContext:
     runAsUser: 0
     runAsGroup: 0
-
-  # Uncomment jika image ada di private registry
   # imagePullSecrets:
   #   - name: harbor-regcred
-
   containers:
-    # helper container: git + ssh + curl
-    # jnlp TIDAK ditulis di sini — Kubernetes plugin inject otomatis
     - name: tools
       image: alpine/git:latest
       imagePullPolicy: IfNotPresent
-      command:
-        - cat
+      command: [cat]
       tty: true
       resources:
         requests:
@@ -137,9 +89,6 @@ spec:
 
   stages {
 
-    // ── 1. Validate ───────────────────────────────────────────
-    // Murni Groovy → jalan di jnlp (defaultContainer)
-    // Tidak butuh git/curl → tidak perlu container('tools')
     stage('Validate Parameters') {
       steps {
         script {
@@ -150,13 +99,10 @@ spec:
             error "SERVICE harus lowercase alphanumeric dan hyphens (min 2 karakter)."
           }
           echo "✅ Validasi parameter OK"
-          echo "   Pod: jnlp (auto-inject) + tools (alpine/git)"
         }
       }
     }
 
-    // ── 2. Clone DevOps Repo ──────────────────────────────────
-    // Butuh git + ssh → eksplisit container('tools')
     stage('Clone DevOps Repo') {
       steps {
         container('tools') {
@@ -177,9 +123,6 @@ spec:
       }
     }
 
-    // ── 3. Clone Starter Helm ─────────────────────────────────
-    // Butuh git → container('tools')
-    // /root/.ssh sudah ada dari stage sebelumnya (persist dalam pod)
     stage('Clone Starter Helm') {
       steps {
         container('tools') {
@@ -198,20 +141,11 @@ spec:
       }
     }
 
-    // ── 4. Prepare Service Directory ──────────────────────────
-    // sh mkdir/cp/rm  → container('tools')
-    // readFile/writeFile (Jenkins built-in step) → tidak butuh container() wrapper
     stage('Prepare Service Directory') {
       steps {
         script {
-          def service     = params.SERVICE
-          def env         = params.ENV
-          // ── PATH PER ENV ─────────────────────────────────────────────
-          // services/<service>/<env>/helm-<service>/
-          // Setiap environment punya direktori sendiri → tidak saling tertimpa
-          // Contoh:
-          //   services/payment-api/dev/helm-payment-api/values.yaml
-          //   services/payment-api/prod/helm-payment-api/values.yaml
+          def service       = params.SERVICE
+          def env           = params.ENV
           def serviceEnvDir = "${REPO_PATH}/services/${service}/${env}"
           def helmDestDir   = "${serviceEnvDir}/helm-${service}"
 
@@ -224,7 +158,6 @@ spec:
             """
           }
 
-          // readFile/writeFile: Jenkins step, otomatis jalan di defaultContainer (jnlp)
           def chartYaml = readFile("${helmDestDir}/Chart.yaml")
           writeFile file: "${helmDestDir}/Chart.yaml", text: chartYaml
             .replace('{{ SERVICE }}', service)
@@ -234,10 +167,7 @@ spec:
       }
     }
 
-    // ── 5. Patch Values & Generate Jenkinsfile ────────────────
-    // Murni readFile/writeFile + Groovy string replace
-    // → jalan di jnlp (defaultContainer), tidak butuh tools
-    stage('Patch Values & Generate Jenkinsfile') {
+    stage('Patch Values & Generate Files') {
       steps {
         script {
           def service          = params.SERVICE
@@ -254,16 +184,19 @@ spec:
           writeFile file: "${helmDestDir}/values.yaml", text: patchedValues
           echo "✅ values.yaml di-patch"
 
-          // Jenkinsfile disimpan di dalam folder env, bukan di root service
           def jenkinsfileContent = generateJenkinsfile(registryCredId, kubeConfigCredId, helmOciCredId)
           writeFile file: "${serviceEnvDir}/Jenkinsfile", text: jenkinsfileContent
           echo "✅ Jenkinsfile di-generate"
+
+          if (params.GENERATE_DOCKERFILE) {
+            def dockerfileContent = generateDockerfile()
+            writeFile file: "${serviceEnvDir}/Dockerfile", text: dockerfileContent
+            echo "✅ Dockerfile di-generate (runtime: ${params.DOCKERFILE_RUNTIME_TYPE})"
+          }
         }
       }
     }
 
-    // ── 6. Push to DevOps Repo ────────────────────────────────
-    // Butuh git → container('tools')
     stage('Push to DevOps Repo') {
       steps {
         container('tools') {
@@ -281,11 +214,11 @@ spec:
                   else
                     git commit -m "feat: init service ${params.SERVICE} [${params.ENV}]
 
-Path  : services/${params.SERVICE}/${params.ENV}/
-Files : Jenkinsfile, helm-${params.SERVICE}/values.yaml
-- HPA: ${params.HPA_ENABLED}
-- PDB: ${params.PDB_ENABLED}
-- ExternalSecret: ${params.EXTERNAL_SECRET_ENABLED}"
+Path    : services/${params.SERVICE}/${params.ENV}/
+Runtime : ${params.DOCKERFILE_RUNTIME_TYPE}
+HPA     : ${params.HPA_ENABLED}
+PDB     : ${params.PDB_ENABLED}
+ExtSecret: ${params.EXTERNAL_SECRET_ENABLED}"
                     git push origin ${DEVOPS_BRANCH}
                   fi
                 """
@@ -297,8 +230,6 @@ Files : Jenkinsfile, helm-${params.SERVICE}/values.yaml
       }
     }
 
-    // ── 7. Create Jenkins Deploy Job ──────────────────────────
-    // Butuh curl → container('tools')
     stage('Create Jenkins Deploy Job') {
       steps {
         container('tools') {
@@ -308,8 +239,6 @@ Files : Jenkinsfile, helm-${params.SERVICE}/values.yaml
               usernameVariable: 'JENKINS_USER',
               passwordVariable: 'JENKINS_TOKEN'
             )]) {
-
-              // ── A. Buat folder jika JENKINS_FOLDER diisi ───────
               def folderPath = ''
               if (params.JENKINS_FOLDER?.trim()) {
                 def folderParts = params.JENKINS_FOLDER.trim().split('/')
@@ -318,16 +247,11 @@ Files : Jenkinsfile, helm-${params.SERVICE}/values.yaml
                 folderParts.each { part ->
                   def encodedPart = part.trim()
                   def checkStatus = sh(
-                    script: """
-                      curl -s -o /dev/null -w "%{http_code}" \
-                        --user "${JENKINS_USER}:${JENKINS_TOKEN}" \
-                        "${currentBase}job/${encodedPart}/api/json"
-                    """,
+                    script: """curl -s -o /dev/null -w "%{http_code}" --user "${JENKINS_USER}:${JENKINS_TOKEN}" "${currentBase}job/${encodedPart}/api/json" """,
                     returnStdout: true
                   ).trim()
 
                   if (checkStatus == '404') {
-                    echo "📁 Folder '${encodedPart}' belum ada, membuat..."
                     def folderXml = """<?xml version='1.0' encoding='UTF-8'?>
 <com.cloudbees.hudson.plugins.folder.Folder plugin="cloudbees-folder@6.15">
   <description>Auto-generated folder for ${encodedPart}</description>
@@ -347,7 +271,7 @@ Files : Jenkinsfile, helm-${params.SERVICE}/values.yaml
                     writeFile file: "folder-config-${encodedPart}.xml", text: folderXml
                     def createFolderStatus = sh(
                       script: """
-                        curl -s -o /tmp/folder-create-response.txt -w "%{http_code}" \
+                        curl -s -o /tmp/folder-response.txt -w "%{http_code}" \
                           -X POST "${currentBase}createItem?name=${encodedPart}" \
                           --user "${JENKINS_USER}:${JENKINS_TOKEN}" \
                           --header "Content-Type: application/xml" \
@@ -359,7 +283,7 @@ Files : Jenkinsfile, helm-${params.SERVICE}/values.yaml
                     if (createFolderStatus in ['200', '201']) {
                       echo "✅ Folder '${encodedPart}' berhasil dibuat"
                     } else {
-                      sh 'cat /tmp/folder-create-response.txt || true'
+                      sh 'cat /tmp/folder-response.txt || true'
                       error "❌ Gagal membuat folder '${encodedPart}', HTTP: ${createFolderStatus}"
                     }
 
@@ -373,17 +297,14 @@ Files : Jenkinsfile, helm-${params.SERVICE}/values.yaml
                 folderPath = folderParts.collect { "job/${it.trim()}" }.join('/') + '/'
               }
 
-              // ── B. Render job-config.xml dari template ─────────
-              echo "📄 Membaca template dari ${REPO_PATH}/templates/job-config.xml"
               def jobXmlTemplate = readFile("${REPO_PATH}/templates/job-config.xml")
               def jobXml         = generateJobXml(jobXmlTemplate)
               writeFile file: 'job-config-rendered.xml', text: jobXml
 
-              // ── C. Create atau Update Jenkins Job ──────────────
-              def jobName   = params.SERVICE
-              def checkUrl  = "${JENKINS_URL}${folderPath}job/${jobName}/api/json"
-              def createUrl = "${JENKINS_URL}${folderPath}createItem?name=${jobName}"
-              def updateUrl = "${JENKINS_URL}${folderPath}job/${jobName}/config.xml"
+              def jobName        = params.SERVICE
+              def checkUrl       = "${JENKINS_URL}${folderPath}job/${jobName}/api/json"
+              def createUrl      = "${JENKINS_URL}${folderPath}createItem?name=${jobName}"
+              def updateUrl      = "${JENKINS_URL}${folderPath}job/${jobName}/config.xml"
 
               def jobCheckStatus = sh(
                 script: """curl -s -o /dev/null -w "%{http_code}" --user "${JENKINS_USER}:${JENKINS_TOKEN}" "${checkUrl}" """,
@@ -391,10 +312,9 @@ Files : Jenkinsfile, helm-${params.SERVICE}/values.yaml
               ).trim()
 
               if (jobCheckStatus == '404') {
-                echo "🆕 Job '${jobName}' belum ada, membuat..."
                 def createStatus = sh(
                   script: """
-                    curl -s -o /tmp/job-create-response.txt -w "%{http_code}" \
+                    curl -s -o /tmp/job-response.txt -w "%{http_code}" \
                       -X POST "${createUrl}" \
                       --user "${JENKINS_USER}:${JENKINS_TOKEN}" \
                       --header "Content-Type: application/xml" \
@@ -405,15 +325,14 @@ Files : Jenkinsfile, helm-${params.SERVICE}/values.yaml
                 if (createStatus in ['200', '201']) {
                   echo "✅ Jenkins job '${jobName}' berhasil dibuat"
                 } else {
-                  sh 'cat /tmp/job-create-response.txt || true'
+                  sh 'cat /tmp/job-response.txt || true'
                   error "❌ Gagal create job '${jobName}', HTTP: ${createStatus}"
                 }
 
               } else if (jobCheckStatus == '200') {
-                echo "♻️  Job '${jobName}' sudah ada, update config..."
                 def updateStatus = sh(
                   script: """
-                    curl -s -o /tmp/job-update-response.txt -w "%{http_code}" \
+                    curl -s -o /tmp/job-response.txt -w "%{http_code}" \
                       -X POST "${updateUrl}" \
                       --user "${JENKINS_USER}:${JENKINS_TOKEN}" \
                       --header "Content-Type: application/xml" \
@@ -424,7 +343,7 @@ Files : Jenkinsfile, helm-${params.SERVICE}/values.yaml
                 if (updateStatus in ['200', '201']) {
                   echo "✅ Config job '${jobName}' berhasil diupdate"
                 } else {
-                  sh 'cat /tmp/job-update-response.txt || true'
+                  sh 'cat /tmp/job-response.txt || true'
                   error "❌ Gagal update config job '${jobName}', HTTP: ${updateStatus}"
                 }
 
@@ -450,27 +369,19 @@ Files : Jenkinsfile, helm-${params.SERVICE}/values.yaml
 ╔══════════════════════════════════════════════════════╗
 ║           SERVICE GENERATOR SELESAI                  ║
 ╚══════════════════════════════════════════════════════╝
-
- Service   : ${params.SERVICE}
- ENV target: ${params.ENV}
- Agent     : Kubernetes pod
-             jnlp  (auto-inject plugin, defaultContainer)
-             tools (alpine/git)
-
- Files:
-   services/${params.SERVICE}/${params.ENV}/
-   ├── Jenkinsfile
-   └── helm-${params.SERVICE}/
-       ├── Chart.yaml
-       ├── values.yaml  (patched)
-       └── templates/
-
- Job: ${JENKINS_URL}${folderSegment}job/${params.SERVICE}
+ Service : ${params.SERVICE}
+ ENV     : ${params.ENV}
+ Runtime : ${params.DOCKERFILE_RUNTIME_TYPE}
+ Files   : services/${params.SERVICE}/${params.ENV}/
+           ├── Jenkinsfile
+           ├── Dockerfile
+           └── helm-${params.SERVICE}/
+ Job     : ${JENKINS_URL}${folderSegment}job/${params.SERVICE}
         """
       }
     }
     failure {
-      echo "Service generation gagal. Cek log di atas."
+      echo "❌ Service generation gagal. Cek log di atas."
     }
     cleanup {
       container('tools') {
@@ -481,14 +392,14 @@ Files : Jenkinsfile, helm-${params.SERVICE}/values.yaml
   }
 }
 
-// ════════════════════════════════════════════════════════════
+// ============================================================
 //  HELPERS
-// ════════════════════════════════════════════════════════════
+// ============================================================
 
 def safe(val) { val == null ? '' : val.toString() }
 
 def resolveResources() {
-  switch(params.RESOURCE_PRESET) {
+  switch (params.RESOURCE_PRESET) {
     case 'small':  return [cpuLimit: '500m', cpuRequest: '250m', memLimit: '512Mi', memRequest: '256Mi']
     case 'medium': return [cpuLimit: '1',    cpuRequest: '500m', memLimit: '1Gi',   memRequest: '512Mi']
     case 'large':  return [cpuLimit: '2',    cpuRequest: '1',    memLimit: '2Gi',   memRequest: '1Gi'  ]
@@ -504,16 +415,16 @@ def resolveResources() {
 }
 
 def getRegistryCredentialId() {
-  switch(params.REGISTRY_TYPE) {
-    case 'Harbor':      return 'harbor-credential-id'
-    case 'Huawei SWR':  return 'huawei-credential-id'
-    case 'Docker Hub':  return 'dockerhub-credential-id'
-    default:            return 'dockerhub-credential-id'
+  switch (params.REGISTRY_TYPE) {
+    case 'Harbor':     return 'harbor-credential-id'
+    case 'Huawei SWR': return 'huawei-credential-id'
+    case 'Docker Hub': return 'dockerhub-credential-id'
+    default:           return 'dockerhub-credential-id'
   }
 }
 
 def getKubeConfigCredentialId() {
-  switch(params.ENV) {
+  switch (params.ENV) {
     case 'dev':  return 'kubeconfig-dev'
     case 'uat':  return 'kubeconfig-uat'
     case 'stag': return 'kubeconfig-stag'
@@ -523,15 +434,24 @@ def getKubeConfigCredentialId() {
 }
 
 def getHelmOciCredentialId() {
-  // 'Same as Image Registry' → pakai credential yang sama dengan image registry
   if (params.HELM_OCI_REGISTRY_TYPE == 'Same as Image Registry') {
     return getRegistryCredentialId()
   }
-  switch(params.HELM_OCI_REGISTRY_TYPE) {
-    case 'Harbor':      return 'harbor-credential-id'
-    case 'Huawei SWR':  return 'huawei-credential-id'
-    case 'Docker Hub':  return 'dockerhub-credential-id'
-    default:            return 'dockerhub-credential-id'
+  switch (params.HELM_OCI_REGISTRY_TYPE) {
+    case 'Harbor':     return 'harbor-credential-id'
+    case 'Huawei SWR': return 'huawei-credential-id'
+    case 'Docker Hub': return 'dockerhub-credential-id'
+    default:           return 'dockerhub-credential-id'
+  }
+}
+
+def getEnvFullName(String env) {
+  switch (env) {
+    case 'dev':  return 'development'
+    case 'uat':  return 'uat'
+    case 'stag': return 'staging'
+    case 'prod': return 'production'
+    default:     return env
   }
 }
 
@@ -555,21 +475,7 @@ def patchHelmValues(String template, String env, Map resources) {
     .replace('{{ PDB_MIN_AVAILABLE }}',       safe(params.PDB_MIN_AVAILABLE))
     .replace('{{ EXTERNAL_SECRET_ENABLED }}', safe(params.EXTERNAL_SECRET_ENABLED))
 
-  return """# ================================================================
-# Helm Values -- ${params.SERVICE} [${env.toUpperCase()}]
-# Generated by Jenkins Service Generator
-# ================================================================
-""" + result
-}
-
-def getEnvFullName(String env) {
-  switch(env) {
-    case 'dev':  return 'development'
-    case 'uat':  return 'uat'
-    case 'stag': return 'staging'
-    case 'prod': return 'production'
-    default:     return env
-  }
+  return "# Generated by Jenkins Service Generator — ${params.SERVICE} [${env.toUpperCase()}]\n" + result
 }
 
 def generateJenkinsfile(String registryCredId, String kubeConfigCredId, String helmOciCredId) {
@@ -599,7 +505,7 @@ def generateJenkinsfile(String registryCredId, String kubeConfigCredId, String h
   }
 
   def checkoutBranch = (env == 'prod') ? '${params.GIT_BRANCH}' : defaultBranch
-  def template = readFile("${REPO_PATH}/templates/Jenkinsfile.template")
+  def template       = readFile("${REPO_PATH}/templates/Jenkinsfile.template")
 
   return template
     .replace('{{ SERVICE }}',            service)
@@ -616,6 +522,23 @@ def generateJenkinsfile(String registryCredId, String kubeConfigCredId, String h
     .replace('{{ CHECKOUT_BRANCH }}',    checkoutBranch)
     .replace('{{ HELM_OCI_CRED_ID }}',   helmOciCredId)
     .replace('{{ REGISTRY_SECRET }}',    safe(params.REGISTRY_SECRET))
+    .replace('{{ VAULT_CRED_ID }}',      safe(params.VAULT_CRED_ID))
+}
+
+def generateDockerfile() {
+  def service = safe(params.SERVICE)
+  def env     = safe(params.ENV)
+  def runtime = safe(params.DOCKERFILE_RUNTIME_TYPE)
+  def appPort = safe(params.CONTAINER_PORT) ?: '8080'
+
+  def template = readFile("${REPO_PATH}/templates/dockerfile/Dockerfile.${runtime}.template")
+
+  return template
+    .replace('{{ SERVICE }}',           service)
+    .replace('{{ ENV_UPPER }}',         env.toUpperCase())
+    .replace('{{ APP_PORT }}',          appPort)
+    .replace('{{ VAULT_ADDR }}',        safe(params.VAULT_ADDR))
+    .replace('{{ VAULT_SECRET_PATH }}', safe(params.VAULT_SECRET_PATH))
 }
 
 def generateJobXml(String template) {
