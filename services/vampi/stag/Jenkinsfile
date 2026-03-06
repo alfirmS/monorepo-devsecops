@@ -12,10 +12,9 @@ pipeline {
     KUBE_NAMESPACE     = 'stag'
     REGISTRY_HOST      = '192.168.100.41:9443'
     REGISTRY_CRED_ID   = 'harbor-credential-id'
-    KUBECONFIG_CRED_ID = 'kubeconfig-stag'
+    KUBECONFIG_CRED_ID = 'kubeconfig-credential-id'
     HELM_OCI_CRED_ID   = 'dockerhub-credential-id'
     GIT_CRED_ID        = 'git-credential-id'
-    VAULT_CRED_ID      = 'vault-token'
   }
 
   agent {
