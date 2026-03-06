@@ -4,11 +4,12 @@
 
 **One repo to rule all deployments.**
 
-A centralized GitOps monorepo for managing Helm charts, Kubernetes configurations, and CI/CD pipelines — auto-generated and maintained by Jenkins Service Generator.
+Centralized GitOps monorepo untuk Helm charts, Dockerfile, dan Jenkinsfile — di-generate dan di-maintain otomatis oleh Jenkins Service Generator, di-deploy via Kubernetes-native agent menggunakan Kaniko + Helm.
 
 [![Jenkins](https://img.shields.io/badge/CI%2FCD-Jenkins-D24939?style=for-the-badge&logo=jenkins&logoColor=white)](https://www.jenkins.io/)
 [![Helm](https://img.shields.io/badge/Packaging-Helm-0F1689?style=for-the-badge&logo=helm&logoColor=white)](https://helm.sh/)
 [![Kubernetes](https://img.shields.io/badge/Orchestration-Kubernetes-326CE5?style=for-the-badge&logo=kubernetes&logoColor=white)](https://kubernetes.io/)
+[![Kaniko](https://img.shields.io/badge/Build-Kaniko-F5A623?style=for-the-badge&logo=docker&logoColor=white)](https://github.com/GoogleContainerTools/kaniko)
 [![Vault](https://img.shields.io/badge/Secrets-Vault-FFEC6E?style=for-the-badge&logo=vault&logoColor=black)](https://www.vaultproject.io/)
 
 </div>
@@ -17,95 +18,164 @@ A centralized GitOps monorepo for managing Helm charts, Kubernetes configuration
 
 ## 📖 Overview
 
-This monorepo serves as the **single source of truth** for all service deployments across multiple environments. Rather than scattered configs across dozens of repos, everything lives here — Helm charts, values, and Jenkinsfiles — structured and versioned together.
+Repo ini adalah **single source of truth** untuk seluruh konfigurasi deployment. Setiap service punya folder sendiri yang berisi Jenkinsfile, Dockerfile, dan Helm chart — semuanya di-generate otomatis oleh pipeline generator dan di-commit langsung ke sini.
 
-Helm charts and pipeline configs are **auto-generated** by the Jenkins Service Generator pipeline, which scaffolds everything from a starter template and commits directly to this repo.
+Pipeline deploy berjalan **100% di dalam Kubernetes** menggunakan Pod agent dengan dua container: **Kaniko** (build image tanpa Docker daemon) dan **Helm** (deploy ke cluster).
+
+---
+
+## 🗂️ Struktur Repo
 
 ```
-monorepo-devsecops
-├── templates/                    # Shared pipeline & config templates
-│   └── Jenkinsfile.template      # Base Jenkinsfile for all services
+monorepo-devsecops/
+├── templates/
+│   ├── Jenkinsfile.template          # Template pipeline deploy (semua service)
+│   ├── Dockerfile.template           # Generic Dockerfile template
+│   ├── config.xml                    # Jenkins job XML template
+│   ├── job-config.xml
+│   ├── dockerfile/
+│   │   ├── Dockerfile.golang.template
+│   │   ├── Dockerfile.nodejs.template
+│   │   ├── Dockerfile.python.template
+│   │   └── Dockerfile.vuejs.template
+│   └── generator/
+│       ├── Jenkinsfile.generator     # Pipeline generator (taruh di Jenkins)
+│       └── README.generator.md
 │
-└── services/                     # One folder per service
-    └── <service-name>/
-        ├── Jenkinsfile           # Auto-generated deploy pipeline
-        └── helm-<service-name>/  # Helm chart (copied from starter)
-            ├── Chart.yaml
-            ├── values.yaml       # Patched for target environment
-            └── templates/
-                ├── deployment.yaml
-                ├── service.yaml
-                ├── hpa.yaml
-                ├── pdb.yaml
-                ├── ingress.yaml
-                ├── externalsecrets.yaml
-                └── serviceaccount.yaml
+└── services/
+    └── <service>/
+        └── <env>/                    # dev | uat | stag | prod
+            ├── Jenkinsfile           # Auto-generated deploy pipeline
+            ├── Dockerfile            # Auto-generated (opsional)
+            └── helm-<service>/
+                ├── Chart.yaml
+                ├── values.yaml       # Patched per environment
+                └── templates/
+                    ├── deployment.yaml
+                    ├── service.yaml
+                    ├── ingress.yaml
+                    ├── hpa.yaml
+                    ├── pdb.yaml
+                    ├── externalsecrets.yaml
+                    └── serviceaccount.yaml
 ```
+
+### Services yang sudah terdaftar
+
+| Service | Environment | Helm Chart |
+|---|---|---|
+| `ghost` | `uat` | `helm-ghost` |
+| `juice-shop` | `uat` | `helm-juice-shop` |
+| `vampi` | `uat` | `helm-vampi` |
 
 ---
 
 ## 🌿 Branch Strategy
 
-| Branch | Purpose |
-|---|---|
-| `main` | Production-ready configs, templates, and all generated service files |
-| `helm-starter` | Base Helm chart template — source of truth for new service scaffolding |
-
----
-
-## ⚙️ How It Works
-
-```
-┌─────────────────────────────────────────────────┐
-│           Jenkins Service Generator              │
-│                                                  │
-│  1. Validate parameters                          │
-│  2. Clone this repo (main branch)                │
-│  3. Clone starter helm (helm-starter branch)     │
-│  4. Copy starter → services/<name>/helm-<name>/  │
-│  5. Patch values.yaml with ENV config            │
-│  6. Generate Jenkinsfile from template           │
-│  7. Commit & push to this repo                   │
-│  8. Create Jenkins deploy job via API            │
-└─────────────────────────────────────────────────┘
-                        │
-                        ▼
-        ┌───────────────────────────┐
-        │   Jenkins Deploy Job      │
-        │                           │
-        │  1. Checkout service repo │
-        │  2. Build & push image    │
-        │  3. Clone this repo       │
-        │  4. helm dep update       │
-        │  5. helm lint + dry-run   │
-        │  6. helm upgrade --atomic │
-        │  7. Post-deploy check     │
-        └───────────────────────────┘
-```
-
----
-
-## 🏗️ Onboarding a New Service
-
-All you need to do is run the **Service Generator** job in Jenkins with these parameters:
-
-| Parameter | Description | Example |
+| Branch | Isi | Keterangan |
 |---|---|---|
-| `SERVICE` | Service name (lowercase, hyphens ok) | `payment-api` |
-| `ENV` | Target environment | `dev` / `uat` / `stag` / `prod` |
-| `SERVICE_TYPE_K8S` | Service type | `backend` / `frontend` |
-| `CONTAINER_PORT` | Exposed container port | `8080` |
-| `K8S_SERVICE_TYPE` | Kubernetes service type | `ClusterIP` |
-| `RESOURCE_PRESET` | Resource sizing | `small` / `medium` / `large` / `xlarge` / `custom` |
-| `HPA_ENABLED` | Enable autoscaling | `true` / `false` |
-| `PDB_ENABLED` | Enable pod disruption budget | `true` / `false` |
-| `EXTERNAL_SECRET_ENABLED` | Enable Vault secret sync | `true` / `false` |
-| `REGISTRY_TYPE` | Container registry | `Harbor` / `Huawei SWR` / `Docker Hub` |
-| `REGISTRY_HOST` | Registry host URL | `registry.example.com` |
-| `GIT_CRED_ID` | Jenkins credential for Git SSH | `git-credential-id` |
-| `JENKINS_FOLDER` | Jenkins folder for the deploy job | `backend` |
+| `main` | Templates, services, generated files | Branch utama — semua commit generator masuk ke sini |
+| `helm-starter` | `starter-helm/` | Base Helm chart template untuk scaffolding service baru |
 
-After the generator runs, this repo will have a new commit with all files ready, and a Jenkins deploy job will be created automatically.
+---
+
+## ⚙️ Cara Kerja
+
+```
+┌──────────────────────────────────────────────────────────┐
+│               Jenkins Service Generator                   │
+│          (templates/generator/Jenkinsfile.generator)      │
+│                                                           │
+│  1. Validate parameter SERVICE, ENV, dll                  │
+│  2. Clone monorepo (branch main) → devops-workspace/      │
+│  3. Clone helm-starter → helm-starter-tmp/                │
+│  4. Salin starter ke services/<svc>/<env>/helm-<svc>/     │
+│  5. Patch values.yaml sesuai parameter                    │
+│  6. Generate Jenkinsfile dari Jenkinsfile.template        │
+│  7. Generate Dockerfile dari template runtime-spesifik    │
+│  8. Commit & push ke monorepo                             │
+│  9. Create/update Jenkins deploy job via API              │
+└──────────────────────────────────────────────────────────┘
+                          │
+                          ▼
+┌──────────────────────────────────────────────────────────┐
+│             Jenkins Deploy Job (auto-created)             │
+│          (services/<svc>/<env>/Jenkinsfile)               │
+│                                                           │
+│  Pod Agent: kaniko + helm (running in Kubernetes)         │
+│                                                           │
+│  Checkout  → clone service-src + devops-repo             │
+│  Build     → kaniko build & push image (no Docker daemon) │
+│  Prepare   → helm dep update + patch Chart.yaml version  │
+│  Deploy    → helm lint → dry-run → helm upgrade --atomic  │
+│  Check     → rollout status + stability check (restart)   │
+│  Rollback  → helm rollback otomatis jika gagal            │
+└──────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 🏗️ Onboarding Service Baru
+
+Jalankan **Jenkinsfile.generator** di Jenkins dengan parameter berikut:
+
+### Identity & Networking
+
+| Parameter | Deskripsi | Contoh |
+|---|---|---|
+| `SERVICE` | Nama service (lowercase, boleh hyphens) | `payment-api` |
+| `ENV` | Target environment | `dev` / `uat` / `stag` / `prod` |
+| `CONTAINER_PORT` | Port yang di-expose container | `8080` |
+| `K8S_SERVICE_TYPE` | Kubernetes Service type | `ClusterIP` / `LoadBalancer` |
+
+### Resources
+
+| Parameter | Deskripsi |
+|---|---|
+| `RESOURCE_PRESET` | Pilih preset atau `custom` untuk manual |
+| `CUSTOM_CPU_LIMIT` | CPU limit (jika preset = custom) |
+| `CUSTOM_CPU_REQUEST` | CPU request (jika preset = custom) |
+| `CUSTOM_MEM_LIMIT` | Memory limit (jika preset = custom) |
+| `CUSTOM_MEM_REQUEST` | Memory request (jika preset = custom) |
+
+### Fitur Opsional
+
+| Parameter | Default | Deskripsi |
+|---|---|---|
+| `HPA_ENABLED` | `false` | Enable HorizontalPodAutoscaler |
+| `HPA_MIN_REPLICAS` | `1` | HPA minimum replicas |
+| `HPA_MAX_REPLICAS` | `10` | HPA maximum replicas |
+| `HPA_CPU_TARGET` | `70` | Target CPU utilization (%) |
+| `HPA_MEM_TARGET` | `80` | Target Memory utilization (%) |
+| `PDB_ENABLED` | `false` | Enable PodDisruptionBudget |
+| `PDB_MIN_AVAILABLE` | `1` | Minimum pod available (angka atau %) |
+| `EXTERNAL_SECRET_ENABLED` | `false` | Enable Vault secret sync via ESO |
+
+### Build & Registry
+
+| Parameter | Deskripsi | Contoh |
+|---|---|---|
+| `REGISTRY_TYPE` | Container registry | `Harbor` / `Huawei SWR` / `Docker Hub` |
+| `REGISTRY_HOST` | Registry URL | `registry.example.com` |
+| `REGISTRY_SECRET` | K8s docker-registry secret di namespace jenkins | `regcred` |
+| `HELM_OCI_REGISTRY_TYPE` | Registry untuk helm chart dependency (OCI) | `Docker Hub` / `Same as Image Registry` |
+
+### Dockerfile
+
+| Parameter | Deskripsi |
+|---|---|
+| `GENERATE_DOCKERFILE` | Generate Dockerfile ke `services/<svc>/<env>/Dockerfile` |
+| `DOCKERFILE_RUNTIME_TYPE` | `node-npm` / `node-yarn` / `vuejs` / `python-pip` / `java-jar` / `golang` / `static-nginx` / `custom-cmd` |
+| `VAULT_ADDR` | URL Vault (khusus vuejs dengan secret injection saat build) |
+| `VAULT_SECRET_PATH` | Path secret di Vault, e.g. `secret/data/myapp/uat` |
+| `VAULT_CRED_ID` | Jenkins credential ID (Secret Text) untuk Vault token |
+
+### Git & Jenkins
+
+| Parameter | Deskripsi |
+|---|---|
+| `GIT_CRED_ID` | Jenkins SSH credential untuk akses Git (`git-credential-id` / `github-ssh-key` / `bitbucket-scm-deployer`) |
+| `JENKINS_FOLDER` | Folder Jenkins tempat deploy job dibuat (kosong = root), e.g. `backend/java` |
 
 ---
 
@@ -123,97 +193,128 @@ After the generator runs, this repo will have a new commit with all files ready,
 
 ## 🌍 Environments
 
-| ENV | Namespace | Default Branch | Kubeconfig Credential |
-|---|---|---|---|
-| `dev` | `development` | `dev` | `kubeconfig-dev` |
-| `uat` | `uat` | `uat` | `kubeconfig-uat` |
-| `stag` | `staging` | `main` | `kubeconfig-stag` |
-| `prod` | `production` | `main` | `kubeconfig-prod` |
+| ENV | Namespace | Default Branch | Auto Trigger | Kubeconfig Credential |
+|---|---|---|---|---|
+| `dev` | `dev` | `dev` | ✅ `githubPush()` | `kubeconfig-dev` |
+| `uat` | `uat` | `uat` | ✅ `githubPush()` | `kubeconfig-uat` |
+| `stag` | `stag` | `main` | ✅ `githubPush()` | `kubeconfig-stag` |
+| `prod` | `prod` | manual input param | ❌ manual only | `kubeconfig-prod` |
+
+> `prod` tidak punya auto-trigger dan memerlukan input branch/tag secara manual setiap kali deploy — sebagai safeguard production.
 
 ---
 
-## 🏷️ Image Tagging
+## 🏷️ Image & Chart Versioning
 
-Images are tagged automatically using the format:
+Image tag dibuat otomatis saat build:
 
 ```
-{commitId}-{ddmmyy}-{BUILD_NUMBER}
+{commitShortSha}.{ddmmyy}.{BUILD_NUMBER}
 
-# Example:
-a1b2c3d-060326-42
+# Contoh:
+a1b2c3d.060326.42
 ```
 
-The same tag is also written to `Chart.yaml` as both `version` and `appVersion` before each deploy.
+`Chart.yaml` di-patch sebelum deploy:
+
+```yaml
+version: "060326.42"            # dateStamp.buildNumber
+appVersion: "a1b2c3d.060326.42" # image tag lengkap
+```
+
+---
+
+## 🐳 Build dengan Kaniko
+
+Image di-build menggunakan **Kaniko** — tidak memerlukan Docker daemon, aman dijalankan sebagai container biasa di dalam Kubernetes.
+
+```
+kaniko executor
+  --context        dir://workspace/service-src
+  --dockerfile     workspace/devops-repo/services/<svc>/<env>/Dockerfile
+  --destination    <registry>/<service>:<tag>
+  --cache          true
+  --cache-ttl      24h
+  --snapshot-mode  redo
+```
+
+Untuk service VueJS, Kaniko menerima `--build-arg VAULT_TOKEN` untuk secret injection saat build time.
 
 ---
 
 ## 🔐 Required Jenkins Credentials
 
-| Credential ID | Type | Used For |
+| Credential ID | Type | Digunakan Untuk |
 |---|---|---|
-| `git-credential-id` | SSH Private Key | Git clone & push |
-| `harbor-registry-credential-id` | Username/Password | Harbor image push |
-| `huawei-swr-credential-id` | Username/Password | Huawei SWR image push |
-| `dockerhub-credential-id` | Username/Password | Docker Hub image push |
-| `dockerhub-oci-credentials` | Username/Password | `helm dep update` (OCI) |
-| `kubeconfig-dev` | Secret File | Deploy to dev cluster |
-| `kubeconfig-uat` | Secret File | Deploy to uat cluster |
-| `kubeconfig-stag` | Secret File | Deploy to staging cluster |
-| `kubeconfig-prod` | Secret File | Deploy to production cluster |
-| `jenkins-api-user` | Username/Password | Create Jenkins jobs via API |
+| `git-credential-id` | SSH Private Key | Clone & push ke GitHub |
+| `harbor-credential-id` | Username/Password | Push image ke Harbor |
+| `huawei-credential-id` | Username/Password | Push image ke Huawei SWR |
+| `dockerhub-credential-id` | Username/Password | Push image ke Docker Hub |
+| `kubeconfig-dev` | Secret File | Deploy ke cluster dev |
+| `kubeconfig-uat` | Secret File | Deploy ke cluster uat |
+| `kubeconfig-stag` | Secret File | Deploy ke cluster staging |
+| `kubeconfig-prod` | Secret File | Deploy ke cluster production |
+| `vault-token` | Secret Text | Vault token untuk build-time secret injection |
+| `jenkins-api-user` | Username/Password | Create/update Jenkins job via API |
 
 ---
 
 ## 🔄 Deploy Pipeline Stages
 
 ```
-Checkout          →   Clone service repo to service-src/
-Build & Push      →   docker build + push with auto-generated IMAGE_TAG
-Prepare Helm      →   Clone this repo, helm dep update, patch Chart.yaml version
-Deploy            →   helm lint → dry-run → helm upgrade --atomic
-Post-Deploy Check →   kubectl rollout status + pod list + recent events
+Checkout          →  Clone service repo (service-src/)
+                     Clone monorepo (devops-repo/)
+Build & Push      →  kaniko build image → push ke registry dengan IMAGE_TAG
+Prepare Helm      →  helm dep update (OCI)
+                     Patch Chart.yaml: version = dateStamp.build, appVersion = imageTag
+Deploy            →  helm lint → dry-run → helm upgrade --install --atomic --timeout 5m
+Post-Deploy Check →  rollout status → sleep 30s → cek restart count
+                     ↳ jika restart > 0: print logs + describe + events → error → rollback
 ```
 
-If deploy fails, an automatic rollback is triggered via `helm rollback`.
+Jika deploy gagal atau restart terdeteksi, pipeline otomatis menjalankan `helm rollback` ke release sebelumnya.
 
 ---
 
-## ✏️ Updating a Service Manually
+## 📋 Dockerfile Templates
 
-Since Helm charts and `values.yaml` live directly in this repo, you can update them without re-running the generator:
+Generator mendukung 8 runtime template yang tersedia di `templates/dockerfile/`:
+
+| Runtime | Template File | Keterangan |
+|---|---|---|
+| `node-npm` | `Dockerfile.nodejs.template` | Node.js dengan npm |
+| `node-yarn` | `Dockerfile.nodejs.template` | Node.js dengan yarn |
+| `vuejs` | `Dockerfile.vuejs.template` | Vue.js + optional Vault secret injection |
+| `python-pip` | `Dockerfile.python.template` | Python dengan pip |
+| `golang` | `Dockerfile.golang.template` | Go binary multi-stage build |
+| `java-jar` | — | Java executable JAR |
+| `static-nginx` | — | Static files via Nginx |
+| `custom-cmd` | — | Custom entrypoint |
+
+---
+
+## ✏️ Update Manual
+
+Karena Helm chart dan `values.yaml` langsung ada di repo, kamu bisa edit tanpa re-generate:
 
 ```bash
-# Clone the repo
 git clone git@github.com:alfirmS/monorepo-devsecops.git
 cd monorepo-devsecops
 
-# Edit values for a service
-vim services/my-service/helm-my-service/values.yaml
+# Contoh: edit resource limit juice-shop di uat
+vim services/juice-shop/uat/helm-juice-shop/values.yaml
 
-# Commit and push
 git add .
-git commit -m "fix: adjust resource limits for my-service"
+git commit -m "fix: adjust memory limit juice-shop uat"
 git push origin main
 ```
 
-The next deploy job run will automatically pick up the changes.
-
----
-
-## 📐 Helm Chart Features
-
-Each generated Helm chart supports:
-
-- 🔁 **HPA** — HorizontalPodAutoscaler with CPU & memory targets
-- 🛡️ **PDB** — PodDisruptionBudget for high availability
-- 🔒 **ExternalSecret** — Vault KV v2 integration via External Secrets Operator
-- 🌐 **Ingress** — Nginx Ingress with optional traffic splitting
-- 📦 **Common Library** — Shared templates via OCI dependency (`oci://registry-1.docker.io/sfirman87/common-library`)
+Deploy job berikutnya akan otomatis menggunakan konfigurasi terbaru.
 
 ---
 
 <div align="center">
 
-Made with ☕ and way too many `helm upgrade` commands.
+Made with ☕, `helm upgrade --atomic`, dan banyak iterasi.
 
 </div>
