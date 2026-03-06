@@ -1,0 +1,305 @@
+pipeline {
+
+
+
+  environment {
+    SERVICE            = 'vampi'
+    ENV                = 'stag'
+    SERVICE_REPO       = 'git@github.com:alfirmS/vampi.git'
+    DOCKERFILE_PATH    = 'services/vampi/stag/Dockerfile'
+    HELM_CHART_PATH    = 'devops-repo/services/vampi/stag/helm-vampi'
+    HELM_VALUES_PATH   = 'devops-repo/services/vampi/stag/helm-vampi/values.yaml'
+    KUBE_NAMESPACE     = 'stag'
+    REGISTRY_HOST      = '192.168.100.41:9443'
+    REGISTRY_CRED_ID   = 'harbor-credential-id'
+    KUBECONFIG_CRED_ID = 'kubeconfig-stag'
+    HELM_OCI_CRED_ID   = 'dockerhub-credential-id'
+    GIT_CRED_ID        = 'git-credential-id'
+    VAULT_CRED_ID      = 'vault-token'
+  }
+
+  agent {
+    kubernetes {
+      cloud            'kubernetes'
+      defaultContainer 'jnlp'
+      yaml """
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    component: ci
+    service: vampi
+    env: stag
+spec:
+  securityContext:
+    runAsUser: 0
+    runAsGroup: 0
+  imagePullSecrets:
+    - name: regcred
+  containers:
+    - name: kaniko
+      image: gcr.io/kaniko-project/executor:debug
+      imagePullPolicy: IfNotPresent
+      command: [/busybox/cat]
+      tty: true
+      env:
+        - name: GODEBUG
+          value: "http2client=0"
+      volumeMounts:
+        - name: registry-creds
+          mountPath: /kaniko/.docker
+      resources:
+        requests:
+          cpu: "500m"
+          memory: "1Gi"
+        limits:
+          cpu: "1"
+          memory: "2Gi"
+    - name: helm
+      image: alpine/helm:latest
+      imagePullPolicy: IfNotPresent
+      command: [cat]
+      tty: true
+      resources:
+        requests:
+          cpu: "200m"
+          memory: "256Mi"
+        limits:
+          cpu: "500m"
+          memory: "512Mi"
+  volumes:
+    - name: registry-creds
+      projected:
+        sources:
+          - secret:
+              name: regcred
+              items:
+                - key: .dockerconfigjson
+                  path: config.json
+"""
+    }
+  }
+
+  triggers {
+    githubPush()
+  }
+
+
+  stages {
+
+    stage('Checkout') {
+      steps {
+        dir('service-src') {
+          checkout([
+            $class: 'GitSCM',
+            branches: [[name: "main"]],
+            userRemoteConfigs: [[
+              url: "${SERVICE_REPO}",
+              credentialsId: "${GIT_CRED_ID}"
+            ]]
+          ])
+        }
+        dir('devops-repo') {
+          checkout([
+            $class: 'GitSCM',
+            branches: [[name: 'main']],
+            userRemoteConfigs: [[
+              url: 'git@github.com:alfirmS/monorepo-devsecops.git',
+              credentialsId: "${GIT_CRED_ID}"
+            ]]
+          ])
+        }
+      }
+    }
+
+    stage('Build & Push Image') {
+      steps {
+        script {
+          def commitId  = sh(script: 'git -C service-src rev-parse --short HEAD', returnStdout: true).trim()
+          def dateStamp = sh(script: 'date +%d%m%y', returnStdout: true).trim()
+          env.IMAGE_TAG = "${commitId}.${dateStamp}.${BUILD_NUMBER}"
+          echo "IMAGE_TAG: ${env.IMAGE_TAG}"
+        }
+        container('kaniko') {
+          script {
+            if (env.VAULT_CRED_ID?.trim()) {
+              withCredentials([string(credentialsId: env.VAULT_CRED_ID, variable: 'VAULT_TOKEN')]) {
+                sh """
+                  /kaniko/executor \
+                    --context=dir://\${WORKSPACE}/service-src \
+                    --dockerfile=\${WORKSPACE}/devops-repo/\${DOCKERFILE_PATH} \
+                    --destination=${REGISTRY_HOST}/${SERVICE}:${IMAGE_TAG} \
+                    --build-arg VAULT_TOKEN=\${VAULT_TOKEN} \
+                    --skip-tls-verify \
+                    --cache=true \
+                    --cache-ttl=24h \
+                    --compressed-caching=false \
+                    --snapshot-mode=redo
+                """
+              }
+            } else {
+              sh """
+                /kaniko/executor \
+                  --context=dir://\${WORKSPACE}/service-src \
+                  --dockerfile=\${WORKSPACE}/devops-repo/\${DOCKERFILE_PATH} \
+                  --destination=${REGISTRY_HOST}/${SERVICE}:${IMAGE_TAG} \
+                  --skip-tls-verify \
+                  --cache=true \
+                  --cache-ttl=24h \
+                  --compressed-caching=false \
+                  --snapshot-mode=redo
+              """
+            }
+          }
+          echo "✅ Image pushed: ${REGISTRY_HOST}/${SERVICE}:${IMAGE_TAG}"
+        }
+      }
+    }
+
+    stage('Prepare Helm') {
+      steps {
+        container('helm') {
+          script {
+            sh 'apk add --no-cache curl kubectl 2>/dev/null || true'
+
+            def dateStamp = sh(script: 'date +%d%m%y', returnStdout: true).trim()
+            env.CHART_VERSION = "${dateStamp}.${BUILD_NUMBER}"
+
+            withCredentials([usernamePassword(
+              credentialsId: env.HELM_OCI_CRED_ID,
+              usernameVariable: 'DH_USER',
+              passwordVariable: 'DH_PASS'
+            )]) {
+              sh """
+                helm registry login registry-1.docker.io -u "${DH_USER}" -p "${DH_PASS}"
+                helm dep update ${HELM_CHART_PATH}
+                helm registry logout registry-1.docker.io
+              """
+            }
+
+            sh """
+              sed -i "s|^version:.*|version: \\"${CHART_VERSION}\\"|" ${HELM_CHART_PATH}/Chart.yaml
+              sed -i "s|^appVersion:.*|appVersion: \\"${IMAGE_TAG}\\"|" ${HELM_CHART_PATH}/Chart.yaml
+            """
+            echo "✅ Helm chart siap — version: ${CHART_VERSION}, appVersion: ${IMAGE_TAG}"
+          }
+        }
+      }
+    }
+
+    stage('Deploy') {
+      steps {
+        container('helm') {
+          script {
+            withCredentials([file(credentialsId: env.KUBECONFIG_CRED_ID, variable: 'KUBECONFIG')]) {
+              sh """
+                helm lint ${HELM_CHART_PATH} \
+                  -f ${HELM_VALUES_PATH} \
+                  --set image.repository=${REGISTRY_HOST}/${SERVICE} \
+                  --set image.tag=${IMAGE_TAG}
+
+                helm upgrade --install ${SERVICE} ${HELM_CHART_PATH} \
+                  -f ${HELM_VALUES_PATH} \
+                  --set image.repository=${REGISTRY_HOST}/${SERVICE} \
+                  --set image.tag=${IMAGE_TAG} \
+                  --namespace ${KUBE_NAMESPACE} \
+                  --dry-run --debug
+              """
+              echo "✅ Helm lint & dry-run OK"
+
+              sh """
+                helm upgrade --install ${SERVICE} ${HELM_CHART_PATH} \
+                  -f ${HELM_VALUES_PATH} \
+                  --set image.repository=${REGISTRY_HOST}/${SERVICE} \
+                  --set image.tag=${IMAGE_TAG} \
+                  --namespace ${KUBE_NAMESPACE} \
+                  --create-namespace \
+                  --atomic \
+                  --timeout 5m \
+                  --history-max 5
+              """
+              echo "✅ Helm deploy selesai"
+            }
+          }
+        }
+      }
+    }
+
+    stage('Post-Deploy Check') {
+      steps {
+        container('helm') {
+          script {
+            withCredentials([file(credentialsId: env.KUBECONFIG_CRED_ID, variable: 'KUBECONFIG')]) {
+              sh """
+                kubectl rollout status deployment/${SERVICE} \
+                  -n ${KUBE_NAMESPACE} --timeout=3m
+              """
+
+              echo "Menunggu 30 detik untuk stability check..."
+              sleep(30)
+
+              sh """
+                kubectl get pods -n ${KUBE_NAMESPACE} \
+                  -l app.kubernetes.io/name=${SERVICE} -o wide
+              """
+
+              def restartCount = sh(
+                script: """
+                  kubectl get pods -n ${KUBE_NAMESPACE} \
+                    -l app.kubernetes.io/name=${SERVICE} \
+                    -o jsonpath='{.items[*].status.containerStatuses[*].restartCount}' \
+                  | tr ' ' '\\n' | awk '{s+=\$1} END {print s+0}'
+                """,
+                returnStdout: true
+              ).trim().toInteger()
+
+              if (restartCount > 0) {
+                sh """
+                  kubectl logs -n ${KUBE_NAMESPACE} \
+                    -l app.kubernetes.io/name=${SERVICE} --tail=50 || true
+                  kubectl logs -n ${KUBE_NAMESPACE} \
+                    -l app.kubernetes.io/name=${SERVICE} --previous --tail=50 || true
+                  kubectl describe pods -n ${KUBE_NAMESPACE} \
+                    -l app.kubernetes.io/name=${SERVICE} || true
+                  kubectl get events -n ${KUBE_NAMESPACE} \
+                    --sort-by='.lastTimestamp' | grep ${SERVICE} | tail -15 || true
+                """
+                error "❌ Pod restart terdeteksi (count: ${restartCount}) — rollback akan dijalankan."
+              }
+
+              sh """
+                kubectl get pods -n ${KUBE_NAMESPACE} \
+                  -l app.kubernetes.io/name=${SERVICE} -o wide
+                kubectl get events -n ${KUBE_NAMESPACE} \
+                  --sort-by='.lastTimestamp' | grep ${SERVICE} | tail -10 || true
+              """
+              echo "✅ Stability check OK"
+            }
+          }
+        }
+      }
+    }
+  }
+
+  post {
+    success {
+      echo """
+✅ Deploy ${SERVICE} ke [STAG] berhasil!
+   Image tag : ${IMAGE_TAG}
+   Namespace : ${KUBE_NAMESPACE}
+      """
+    }
+    failure {
+      container('helm') {
+        script {
+          withCredentials([file(credentialsId: env.KUBECONFIG_CRED_ID, variable: 'KUBECONFIG')]) {
+            sh "helm rollback ${SERVICE} 0 -n ${KUBE_NAMESPACE} || true"
+          }
+        }
+      }
+    }
+    cleanup {
+      sh 'rm -rf service-src devops-repo || true'
+    }
+  }
+}
