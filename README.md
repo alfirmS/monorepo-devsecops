@@ -204,33 +204,33 @@ monorepo-devsecops/
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│               Jenkins Service Generator                   │
-│          (templates/generator/Jenkinsfile.generator)      │
-│                                                           │
-│  1. Validate parameter SERVICE, ENV, dll                  │
-│  2. Clone monorepo (branch main) → devops-workspace/      │
-│  3. Clone helm-starter → helm-starter-tmp/                │
-│  4. Salin starter ke services/<svc>/<env>/helm-<svc>/     │
-│  5. Patch values.yaml sesuai parameter                    │
-│  6. Generate Jenkinsfile dari Jenkinsfile.template        │
-│  7. Generate Dockerfile dari template runtime-spesifik    │
-│  8. Commit & push ke monorepo                             │
-│  9. Create/update Jenkins deploy job via API              │
+│               Jenkins Service Generator                  │
+│          (templates/generator/Jenkinsfile.generator)     │
+│                                                          │
+│  1. Validate parameter SERVICE, ENV, dll                 │
+│  2. Clone monorepo (branch main) → devops-workspace/     │
+│  3. Clone helm-starter → helm-starter-tmp/               │
+│  4. Salin starter ke services/<svc>/<env>/helm-<svc>/    │
+│  5. Patch values.yaml sesuai parameter                   │
+│  6. Generate Jenkinsfile dari Jenkinsfile.template       │
+│  7. Generate Dockerfile dari template runtime-spesifik   │
+│  8. Commit & push ke monorepo                            │
+│  9. Create/update Jenkins deploy job via API             │
 └──────────────────────────────────────────────────────────┘
                           │
                           ▼
 ┌──────────────────────────────────────────────────────────┐
-│             Jenkins Deploy Job (auto-created)             │
-│          (services/<svc>/<env>/Jenkinsfile)               │
-│                                                           │
-│  Pod Agent: kaniko + helm (running in Kubernetes)         │
-│                                                           │
+│             Jenkins Deploy Job (auto-created)            │
+│          (services/<svc>/<env>/Jenkinsfile)              │
+│                                                          │
+│  Pod Agent: kaniko + helm (running in Kubernetes)        │
+│                                                          │
 │  Checkout  → clone service-src + devops-repo             │
-│  Build     → kaniko build & push image (no Docker daemon) │
+│  Build     → kaniko build & push image (no Docker daemon)│
 │  Prepare   → helm dep update + patch Chart.yaml version  │
-│  Deploy    → helm lint → dry-run → helm upgrade --atomic  │
-│  Check     → rollout status + stability check (restart)   │
-│  Rollback  → helm rollback otomatis jika gagal            │
+│  Deploy    → helm lint → dry-run → helm upgrade --atomic │
+│  Check     → rollout status + stability check (restart)  │
+│  Rollback  → helm rollback otomatis jika gagal           │
 └──────────────────────────────────────────────────────────┘
 ```
 
