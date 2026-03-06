@@ -10,7 +10,7 @@ pipeline {
     HELM_CHART_PATH    = 'devops-repo/services/vampi/stag/helm-vampi'
     HELM_VALUES_PATH   = 'devops-repo/services/vampi/stag/helm-vampi/values.yaml'
     KUBE_NAMESPACE     = 'stag'
-    REGISTRY_HOST      = '192.168.100.41:9443'
+    REGISTRY_HOST      = '192.168.100.41:9443/lab'
     REGISTRY_CRED_ID   = 'harbor-credential-id'
     KUBECONFIG_CRED_ID = 'kubeconfig-credential-id'
     HELM_OCI_CRED_ID   = 'dockerhub-credential-id'
