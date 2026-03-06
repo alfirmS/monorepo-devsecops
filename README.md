@@ -24,9 +24,6 @@ Pipeline deploy berjalan **100% di dalam Kubernetes** menggunakan Pod agent deng
 
 ---
 
-
----
-
 ## ✅ Prerequisites
 
 Sebelum menggunakan monorepo ini, pastikan semua komponen berikut sudah tersedia dan terkonfigurasi.
