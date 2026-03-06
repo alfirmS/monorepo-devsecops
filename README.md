@@ -24,6 +24,127 @@ Pipeline deploy berjalan **100% di dalam Kubernetes** menggunakan Pod agent deng
 
 ---
 
+
+---
+
+## ✅ Prerequisites
+
+Sebelum menggunakan monorepo ini, pastikan semua komponen berikut sudah tersedia dan terkonfigurasi.
+
+### 1. Kubernetes Cluster
+
+Jenkins agent berjalan sebagai Pod di dalam cluster. Pastikan:
+
+- Kubernetes cluster sudah berjalan (v1.24+)
+- Jenkins sudah terinstall dan terhubung ke cluster via **Kubernetes plugin**
+- Jenkins service account punya permission untuk create Pod di namespace `jenkins`
+
+```bash
+# Verifikasi koneksi Jenkins ke cluster
+kubectl get pods -n jenkins
+```
+
+### 2. Jenkins Plugins
+
+Install plugin berikut di Jenkins (**Manage Jenkins → Plugins**):
+
+| Plugin | Keterangan |
+|---|---|
+| **Kubernetes** | Menjalankan build agent sebagai Pod di cluster |
+| **Git** | Clone repository |
+| **GitHub** | GitHub webhook & `githubPush()` trigger |
+| **Credentials Binding** | Inject credentials ke pipeline |
+| **Pipeline** | Declarative pipeline support |
+
+### 3. Kubernetes Secret untuk Registry (regcred)
+
+Kaniko membaca credential registry dari `/kaniko/.docker/config.json` yang di-mount dari Kubernetes secret. Buat secret ini di namespace `jenkins` **sebelum** menjalankan pipeline apapun:
+
+```bash
+# Untuk Harbor / private registry
+kubectl create secret docker-registry regcred \
+  --docker-server=<REGISTRY_HOST> \
+  --docker-username=<USERNAME> \
+  --docker-password=<PASSWORD> \
+  --namespace=jenkins
+
+# Untuk Docker Hub
+kubectl create secret docker-registry regcred \
+  --docker-server=https://index.docker.io/v1/ \
+  --docker-username=<DOCKERHUB_USER> \
+  --docker-password=<DOCKERHUB_TOKEN> \
+  --namespace=jenkins
+
+# Verifikasi isi secret
+kubectl get secret regcred -n jenkins \
+  -o jsonpath='{.data.\.dockerconfigjson}' | base64 -d | jq .
+```
+
+> **Catatan:** Nama secret default adalah `regcred`. Jika menggunakan nama lain, sesuaikan parameter `REGISTRY_SECRET` saat menjalankan generator.
+
+### 4. Jenkins Credentials
+
+Tambahkan credentials berikut di **Manage Jenkins → Credentials**:
+
+| Credential ID | Type | Cara Membuat |
+|---|---|---|
+| `git-credential-id` | SSH Username with private key | Generate SSH key, tambahkan public key ke GitHub Deploy Keys |
+| `harbor-credential-id` | Username with password | Username & password Harbor registry |
+| `huawei-credential-id` | Username with password | AK/SK Huawei SWR |
+| `dockerhub-credential-id` | Username with password | Username & access token Docker Hub |
+| `kubeconfig-dev` | Secret file | File kubeconfig cluster dev |
+| `kubeconfig-uat` | Secret file | File kubeconfig cluster uat |
+| `kubeconfig-stag` | Secret file | File kubeconfig cluster staging |
+| `kubeconfig-prod` | Secret file | File kubeconfig cluster production |
+| `vault-token` | Secret text | Token Vault (hanya jika pakai VueJS + Vault) |
+| `jenkins-api-user` | Username with password | Username & API token Jenkins (User → Configure → API Token) |
+
+```bash
+# Generate SSH key untuk git-credential-id
+ssh-keygen -t ed25519 -C "jenkins@ci" -f ~/.ssh/jenkins_deploy_key
+
+# Tambahkan public key ke GitHub repo → Settings → Deploy Keys
+cat ~/.ssh/jenkins_deploy_key.pub
+
+# Private key dimasukkan ke Jenkins credential
+cat ~/.ssh/jenkins_deploy_key
+```
+
+### 5. GitHub Webhook (untuk auto-trigger)
+
+Agar `githubPush()` trigger berfungsi di environment `dev`, `uat`, dan `stag`:
+
+1. Buka repository service di GitHub → **Settings → Webhooks → Add webhook**
+2. Payload URL: `http://<JENKINS_URL>/github-webhook/`
+3. Content type: `application/json`
+4. Events: **Just the push event** ✅
+5. Active: ✅
+
+### 6. Helm Starter Chart
+
+Branch `helm-starter` harus berisi folder `starter-helm/` yang merupakan base Helm chart untuk semua service baru.
+
+```bash
+# Verifikasi branch helm-starter
+git clone --branch helm-starter git@github.com:alfirmS/monorepo-devsecops.git helm-starter-check
+ls helm-starter-check/starter-helm/
+# Harus ada: Chart.yaml  values.yaml  templates/
+```
+
+### 7. Jenkinsfile Generator Job
+
+Buat pipeline job di Jenkins yang mengarah ke `templates/generator/Jenkinsfile.generator`:
+
+1. Jenkins → **New Item** → **Pipeline**
+2. Name: `service-generator`
+3. Definition: **Pipeline script from SCM**
+4. SCM: Git → `git@github.com:alfirmS/monorepo-devsecops.git`
+5. Credentials: `git-credential-id`
+6. Branch: `main`
+7. Script Path: `templates/generator/Jenkinsfile.generator`
+
+---
+
 ## 🗂️ Struktur Repo
 
 ```
